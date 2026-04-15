@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-core';
 
 const SESSION_IDLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
-const BDMS_READY_TIMEOUT = 30000; // 30 seconds
+const BDMS_READY_TIMEOUT = 60000; // 30 seconds
 const PAGE_GOTO_TIMEOUT = 60000; // 60 seconds
 const PAGE_GOTO_MAX_RETRIES = 2;
 
@@ -139,8 +139,8 @@ class BrowserService {
         if (attempt > 0) {
           console.log(`[browser] 重试导航 (第${attempt}次)...`);
         }
-        await page.goto('https://jimeng.jianying.com', {
-          waitUntil: 'domcontentloaded',
+        await page.goto('https://jimeng.jianying.com/ai-tool/video/generate', {
+          waitUntil: 'networkidle',
           timeout: PAGE_GOTO_TIMEOUT,
         });
         gotoError = null;
