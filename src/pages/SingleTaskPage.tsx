@@ -28,6 +28,9 @@ export default function SingleTaskPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const maxImages = 9;
   const navigate = useNavigate();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showAtMenu, setShowAtMenu] = useState(false);
+  const [atCursorPos, setAtCursorPos] = useState(0);
 
   const addFiles = useCallback(
     (fileList: FileList | null) => {
@@ -65,6 +68,29 @@ export default function SingleTaskPage() {
     images.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setImages([]);
   }, [images]);
+
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart || 0;
+    setPrompt(value);
+
+    // Check if user just typed '@'
+    if (images.length > 0 && cursorPos > 0 && value[cursorPos - 1] === '@') {
+      setAtCursorPos(cursorPos);
+      setShowAtMenu(true);
+    } else {
+      setShowAtMenu(false);
+    }
+  }, [images.length]);
+
+  const insertAtReference = useCallback((index: number) => {
+    const before = prompt.slice(0, atCursorPos);
+    const after = prompt.slice(atCursorPos);
+    setPrompt(before + index + ' ' + after);
+    setShowAtMenu(false);
+    // Refocus textarea
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [prompt, atCursorPos]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() && images.length === 0) return;
@@ -214,7 +240,7 @@ export default function SingleTaskPage() {
                   </div>
                   <span className="text-xs text-gray-500">
                     {images.length === 0
-                      ? '点击或拖拽上传参考图（可选，最多 5 张）'
+                      ? `点击或拖拽上传参考图（可选，最多 ${maxImages} 张）`
                       : `继续添加（${images.length}/${maxImages}）`}
                   </span>
                   {images.length === 0 && (
@@ -240,18 +266,37 @@ export default function SingleTaskPage() {
           </div>
 
           {/* Prompt */}
-          <div className="bg-[#1c1f2e] rounded-2xl p-4 border border-gray-800">
+          <div className="bg-[#1c1f2e] rounded-2xl p-4 border border-gray-800 relative">
             <label className="block text-sm font-bold mb-3 text-gray-300">
               提示词
             </label>
             <textarea
+              ref={textareaRef}
               className="w-full bg-transparent text-sm resize-none focus:outline-none min-h-[100px] placeholder-gray-600 text-gray-200 leading-relaxed"
               placeholder="描述你想要生成的视频场景。上传参考图后可使用 @1、@2 等引用图片，例如：@1 作为首帧，@2 作为尾帧，模仿 @3 的动作..."
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={handlePromptChange}
+              onBlur={() => setTimeout(() => setShowAtMenu(false), 200)}
               maxLength={5000}
               disabled={isGenerating}
             />
+            {/* @ Mention Popup */}
+            {showAtMenu && images.length > 0 && (
+              <div className="absolute z-50 mt-1 bg-[#252838] border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[200px]">
+                <div className="text-xs text-gray-400 px-2 py-1 mb-1">选择引用图片</div>
+                {images.map((img) => (
+                  <button
+                    key={img.id}
+                    onMouseDown={(e) => { e.preventDefault(); insertAtReference(img.index); }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-purple-500/20 transition-colors"
+                  >
+                    <img src={img.previewUrl} alt="" className="w-8 h-8 object-cover rounded" />
+                    <span className="text-sm text-purple-400 font-medium">@{img.index}</span>
+                    <span className="text-xs text-gray-500">参考图 {img.index}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="text-right text-xs text-gray-500 mt-2">
               {prompt.length}/5000
             </div>
