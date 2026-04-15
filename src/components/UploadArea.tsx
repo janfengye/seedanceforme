@@ -10,7 +10,7 @@ interface UploadAreaProps {
 
 let nextId = 0;
 
-export default function UploadArea({ images, onImagesChange, maxImages = 5 }: UploadAreaProps) {
+export default function UploadArea({ images, onImagesChange, maxImages = 9 }: UploadAreaProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(

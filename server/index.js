@@ -932,7 +932,7 @@ function buildMetaListFromPrompt(prompt, imageCount) {
 // ============================================================
 
 // POST /api/generate-video - 提交任务, 立即返回 taskId
-app.post('/api/generate-video', authenticate, upload.array('files', 5), async (req, res) => {
+app.post('/api/generate-video', authenticate, upload.array('files', 9), async (req, res) => {
   const startTime = Date.now();
   let dbTaskId = null;
 
@@ -1435,7 +1435,7 @@ app.delete('/api/tasks/:id', authenticate, (req, res) => {
 
 // POST /api/tasks/:id/assets - 添加任务素材
 app.post('/api/tasks/:id/assets', authenticate, upload.fields([
-  { name: 'images', maxCount: 5 },
+  { name: 'images', maxCount: 9 },
   { name: 'audios', maxCount: 2 },
 ]), async (req, res) => {
   try {

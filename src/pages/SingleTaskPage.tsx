@@ -26,7 +26,7 @@ export default function SingleTaskPage() {
     status: 'idle',
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const maxImages = 5;
+  const maxImages = 9;
   const navigate = useNavigate();
 
   const addFiles = useCallback(
