@@ -6,6 +6,7 @@ interface VideoPlayerProps {
   isLoading: boolean;
   error?: string;
   progress?: string;
+  useProxy?: boolean;
 }
 
 function proxyUrl(url: string): string {
@@ -18,6 +19,7 @@ export default function VideoPlayer({
   isLoading,
   error,
   progress,
+  useProxy = true,
 }: VideoPlayerProps) {
   if (isLoading) {
     return (
@@ -52,21 +54,21 @@ export default function VideoPlayer({
   }
 
   if (videoUrl) {
-    const proxied = proxyUrl(videoUrl);
+    const finalUrl = useProxy ? proxyUrl(videoUrl) : videoUrl;
 
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-4 md:p-8">
         <div className="w-full max-w-4xl bg-black rounded-2xl overflow-hidden border border-gray-800 shadow-2xl relative group">
           <video
             controls
-            src={proxied}
+            src={finalUrl}
             className="w-full max-h-[80vh] mx-auto"
             autoPlay
             loop
           />
           <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
             <a
-              href={proxied}
+              href={finalUrl}
               download="seedance-video.mp4"
               className="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
             >

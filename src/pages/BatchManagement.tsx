@@ -899,7 +899,9 @@ export default function BatchManagementPage() {
                                 <p className="mt-2 text-xs text-red-300">{runtimeTask.error_message}</p>
                               )}
                               {runtimeTask.video_url && (
-                                <p className="mt-2 text-xs text-green-300">已返回视频结果，可到下载管理继续查看。</p>
+                                <div className="mt-2">
+                                  <video src={`/api/video-proxy?url=${encodeURIComponent(runtimeTask.video_url)}`} className="w-64 rounded border border-gray-700" controls preload="metadata" />
+                                </div>
                               )}
                             </div>
                           ))}

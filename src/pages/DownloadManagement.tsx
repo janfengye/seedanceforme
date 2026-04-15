@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as downloadService from '../services/downloadService';
+import { triggerBrowserDownload } from '../services/downloadService';
+
+const parseUTC = (dateStr: string) => new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
 import type { DownloadTask } from '../types/index';
+import VideoPreviewModal, { VideoHoverPreview } from '../components/VideoPreviewModal';
 
 interface DownloadState {
   tasks: DownloadTask[];
@@ -36,6 +40,8 @@ export default function DownloadManagementPage() {
 
   const { tasks, total, page, pageSize, statusFilter, typeFilter, selectedTaskIds, isLoading, downloadingIds } = state;
 
+  const [previewTask, setPreviewTask] = useState<DownloadTask | null>(null);
+
   // 轮询引用
   const pollIntervalRef = useRef<number | null>(null);
   const hasInitializedRef = useRef(false);
@@ -46,7 +52,7 @@ export default function DownloadManagementPage() {
       taskId: task.taskId,
       historyId: task.historyId,
       createdAt: task.createdAt,
-      elapsedSeconds: Math.floor((Date.now() - new Date(task.createdAt).getTime()) / 1000),
+      elapsedSeconds: Math.floor((Date.now() - parseUTC(task.createdAt).getTime()) / 1000),
     }));
 
   // 手动添加单个任务到轮询列表
@@ -61,7 +67,7 @@ export default function DownloadManagementPage() {
           taskId,
           historyId,
           createdAt,
-          elapsedSeconds: Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000),
+          elapsedSeconds: Math.floor((Date.now() - parseUTC(createdAt).getTime()) / 1000),
         },
       ];
     });
@@ -207,12 +213,14 @@ export default function DownloadManagementPage() {
     }
   };
 
-  const handleDownload = async (taskId: number) => {
-    await withDownloadingState(taskId, async () => {
+  const handleDownload = async (task: DownloadTask) => {
+    await withDownloadingState(task.id, async () => {
       try {
-        await downloadService.downloadVideo(taskId);
-        alert('下载成功');
-        loadTasks();
+        const videoUrl = task.video_url;
+        if (!videoUrl) { alert('视频URL不存在'); return; }
+        const proxyUrl = `/api/video-proxy?url=${encodeURIComponent(videoUrl)}&download=1`;
+        const filename = `${task.project_name || 'video'}_task${task.id}.mp4`;
+        triggerBrowserDownload(proxyUrl, filename);
       } catch (error) {
         alert(`下载失败：${error instanceof Error ? error.message : error}`);
       }
@@ -222,8 +230,13 @@ export default function DownloadManagementPage() {
   const handleBrowserDownload = async (task: DownloadTask) => {
     await withDownloadingState(task.id, async () => {
       try {
-        const fallbackFilename = task.video_path?.split('/').pop() || `${task.project_name || 'video'}_task${task.id}.mp4`;
-        await downloadService.downloadLocalVideoFile(task.id, fallbackFilename);
+        const filename = task.video_path?.split('/').pop() || `${task.project_name || 'video'}_task${task.id}.mp4`;
+        if (task.video_url) {
+          const proxyUrl = `/api/video-proxy?url=${encodeURIComponent(task.video_url)}&download=1`;
+          triggerBrowserDownload(proxyUrl, filename);
+        } else {
+          await downloadService.downloadLocalVideoFile(task.id, filename);
+        }
       } catch (error) {
         alert(`下载到本地失败：${error instanceof Error ? error.message : error}`);
       }
@@ -471,6 +484,7 @@ export default function DownloadManagementPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">提示词</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">类型</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">状态</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase">预览</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">创建时间</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">操作</th>
               </tr>
@@ -522,8 +536,26 @@ export default function DownloadManagementPage() {
                       {task.effective_download_status === 'failed' && '失败'}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-center">
+                    {task.video_url && task.effective_download_status !== 'generating' ? (
+                      <VideoHoverPreview videoUrl={task.video_url}>
+                        <button
+                          onClick={() => setPreviewTask(task)}
+                          className="p-1 text-purple-400 hover:bg-purple-500/10 rounded transition-colors inline-flex"
+                          title="悬停预览 / 点击全屏"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </button>
+                      </VideoHoverPreview>
+                    ) : (
+                      <span className="text-gray-600">-</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-400">
-                    {new Date(task.created_at).toLocaleString('zh-CN')}
+                    {parseUTC(task.created_at).toLocaleString('zh-CN')}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
@@ -542,7 +574,7 @@ export default function DownloadManagementPage() {
                       )}
                       {task.effective_download_status === 'pending' && !!task.video_url && (
                         <button
-                          onClick={() => handleDownload(task.id)}
+                          onClick={() => handleDownload(task)}
                           disabled={downloadingIds.has(task.id)}
                           className="p-1 text-blue-400 hover:bg-blue-500/10 rounded disabled:opacity-50 transition-colors"
                           title="下载"
@@ -630,6 +662,14 @@ export default function DownloadManagementPage() {
             </button>
           </div>
         </div>
+      )}
+      {previewTask && (
+        <VideoPreviewModal
+          videoUrl={previewTask.video_url!}
+          visible={!!previewTask}
+          onClose={() => setPreviewTask(null)}
+          title={previewTask.prompt?.substring(0, 50) || '视频预览'}
+        />
       )}
     </div>
   );

@@ -31,6 +31,7 @@ export default function SingleTaskPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAtMenu, setShowAtMenu] = useState(false);
   const [atCursorPos, setAtCursorPos] = useState(0);
+  const [atSelectedIndex, setAtSelectedIndex] = useState(0);
 
   const addFiles = useCallback(
     (fileList: FileList | null) => {
@@ -77,6 +78,7 @@ export default function SingleTaskPage() {
     // Check if user just typed '@'
     if (images.length > 0 && cursorPos > 0 && value[cursorPos - 1] === '@') {
       setAtCursorPos(cursorPos);
+      setAtSelectedIndex(0);
       setShowAtMenu(true);
     } else {
       setShowAtMenu(false);
@@ -91,6 +93,23 @@ export default function SingleTaskPage() {
     // Refocus textarea
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [prompt, atCursorPos]);
+
+  const handleAtMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showAtMenu || images.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAtSelectedIndex((prev) => (prev + 1) % images.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAtSelectedIndex((prev) => (prev - 1 + images.length) % images.length);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insertAtReference(images[atSelectedIndex].index);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowAtMenu(false);
+    }
+  }, [showAtMenu, images, atSelectedIndex, insertAtReference]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() && images.length === 0) return;
@@ -276,6 +295,7 @@ export default function SingleTaskPage() {
               placeholder="描述你想要生成的视频场景。上传参考图后可使用 @1、@2 等引用图片，例如：@1 作为首帧，@2 作为尾帧，模仿 @3 的动作..."
               value={prompt}
               onChange={handlePromptChange}
+              onKeyDown={handleAtMenuKeyDown}
               onBlur={() => setTimeout(() => setShowAtMenu(false), 200)}
               maxLength={5000}
               disabled={isGenerating}
@@ -284,11 +304,13 @@ export default function SingleTaskPage() {
             {showAtMenu && images.length > 0 && (
               <div className="absolute z-50 mt-1 bg-[#252838] border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[200px]">
                 <div className="text-xs text-gray-400 px-2 py-1 mb-1">选择引用图片</div>
-                {images.map((img) => (
+                {images.map((img, idx) => (
                   <button
                     key={img.id}
                     onMouseDown={(e) => { e.preventDefault(); insertAtReference(img.index); }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-purple-500/20 transition-colors"
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
+                      idx === atSelectedIndex ? 'bg-purple-500/20' : 'hover:bg-purple-500/20'
+                    }`}
                   >
                     <img src={img.previewUrl} alt="" className="w-8 h-8 object-cover rounded" />
                     <span className="text-sm text-purple-400 font-medium">@{img.index}</span>
