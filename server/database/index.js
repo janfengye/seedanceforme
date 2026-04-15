@@ -74,6 +74,23 @@ function shouldSkipMigration(db, file) {
     return ['is_enabled', 'priority'].every((columnName) => columnNames.has(columnName));
   }
 
+  if (file === '20260326_update_email_verification_codes.sql') {
+    const columns = db.prepare(`PRAGMA table_info(email_verification_codes)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return ['code_hash', 'salt', 'attempts', 'consumed_at'].every((columnName) => columnNames.has(columnName));
+  }
+
+  if (file === '20260326_add_system_config_table.sql') {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'`).all();
+    return tables.length > 0;
+  }
+
+  if (file === '001_add_batch_management_features.sql') {
+    const columns = db.prepare(`PRAGMA table_info(tasks)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return columnNames.has('batch_id');
+  }
+
   return false;
 }
 
