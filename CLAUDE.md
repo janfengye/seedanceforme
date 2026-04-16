@@ -244,6 +244,96 @@ server/
 - 删除默认账号后，系统会自动补一个新的默认账号
 - 设置页上的 `session-accounts` 接口显式要求登录态
 
+## 角色与权限体系
+
+三级角色：`super_admin` > `admin` > `user`
+
+| 角色 | 说明 | 判定方式 |
+|------|------|----------|
+| `super_admin` | 超级管理员，仅 admin@seedance.com（id=1） | `role = 'super_admin'` |
+| `admin` | 管理员，由超级管理员提升 | `role = 'admin'` |
+| `user` | 普通用户，通过邀请码注册 | `role = 'user'` |
+
+- `requireAdmin` 中间件同时允许 `admin` 和 `super_admin`
+- **所有 `role === 'admin'` 的判断必须同时兼容 `super_admin`**（常见遗漏点）
+- 管理员共享超级管理员的即梦账号池（`getSessionAccountOwnerId` 辅助函数）
+- 仅超级管理员可提升/降级其他用户角色
+
+### 注册方式
+
+- 注册只需：邀请码 + 用户名(2-10位中英文数字) + 密码
+- 邀请链接格式：`/register?code=XXX`，用户点开后邀请码自动填入只读
+- 无邀请码访问注册页显示提示"请通过管理员分享的邀请链接注册"
+- 登录使用用户名 + 密码
+- 用户表 email 字段设为 `{username}@local` 保持 schema 兼容
+
+### 品牌
+
+- 对外显示名称："我们的团队"（非 Seedance 2.0）
+- 模型名称保持 Seedance 2.0/Fast/VIP 不变
+
+## 即梦积分查询 API（已验证可用）
+
+通过 jimeng-free-api 项目发现并验证的积分查询端点：
+
+```
+POST https://jimeng.jianying.com/commerce/v1/benefits/user_credit
+```
+
+### 认证方式
+
+此 API **不走 a_bogus 签名**，也不走 browserService，而是使用独立的 MD5 签名方案：
+
+```javascript
+const sign = md5(`9e2c|${uri.slice(-7)}|${PLATFORM_CODE}|${VERSION_CODE}|${deviceTime}||11ac`);
+// PLATFORM_CODE = '7', VERSION_CODE = '5.8.0'
+```
+
+必须的请求头（区别于视频生成 API）：
+- `Sign`: MD5 签名
+- `Sign-Ver`: `'1'`
+- `Device-Time`: Unix 时间戳
+- `Appid`: `'513695'`
+- `Appvr`: `'5.8.0'`
+- `Pf`: `'7'`
+- 标准浏览器伪装头（User-Agent、Sec-Ch-Ua 等）
+
+Cookie 格式同视频生成：`sessionid=xxx; sessionid_ss=xxx; sid_tt=xxx; uid_tt=xxx`
+
+### 返回数据结构
+
+```json
+{
+  "ret": "0",
+  "data": {
+    "credit": {
+      "vip_credit": 15000,     // VIP 积分
+      "gift_credit": 0,        // 赠送积分
+      "purchase_credit": 0     // 购买积分
+    },
+    "credits_detail": {
+      "vip_credits": [{
+        "vip_level": "maestro",        // 会员等级
+        "residual_credits": 15000,     // 剩余积分
+        "credits_life_end": 1778886358 // 积分过期时间戳（即会员到期时间）
+      }]
+    }
+  }
+}
+```
+
+### 错误码
+
+- `ret=0`: 成功
+- `ret=1014`: 签名缺失或错误（system busy）
+- `ret=1015`: SessionID 过期（check login error），但仍可能附带 credit 数据
+
+### 关键发现
+
+- `credits_life_end` 时间戳 = 会员到期时间（北京时间），可用于自动判断账号过期
+- 无需手动设置过期日期，从 API 自动获取
+- 此 API 不需要 Playwright/browserService，纯 HTTP 请求即可
+
 ## 下载链路
 
 下载管理分成两类：
