@@ -250,7 +250,7 @@ export default function SettingsPage() {
       <div className="max-w-4xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">全局设置</h1>
 
-        {currentUser?.role === 'admin' ? (<>
+        {currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? (<>
         {/* SessionID 账号管理 - 移到最前面 */}
         <div className="bg-[#1c1f2e] rounded-xl p-6 mb-6 border border-gray-800">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">

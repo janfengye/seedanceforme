@@ -118,8 +118,8 @@ export default function ProfilePage({ currentUser, onUserUpdate }: ProfilePagePr
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400">角色</span>
-              <span className={currentUser?.role === 'admin' ? 'text-amber-400' : 'text-gray-300'}>
-                {currentUser?.role === 'admin' ? '管理员' : '普通用户'}
+              <span className={currentUser?.role === 'admin' || currentUser?.role === 'super_admin' ? 'text-amber-400' : 'text-gray-300'}>
+                {currentUser?.role === 'super_admin' ? '超级管理员' : currentUser?.role === 'admin' ? '管理员' : '普通用户'}
               </span>
             </div>
             <div className="flex justify-between">

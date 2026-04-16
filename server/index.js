@@ -2159,7 +2159,7 @@ app.put('/api/settings', (req, res) => {
 // GET /api/settings/session-accounts - 获取当前用户的 SessionID 账号列表
 app.get('/api/settings/session-accounts', authenticate, (req, res) => {
   try {
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || req.user.role === 'super_admin') {
       const accounts = jimengSessionService.listUserAccounts(req.user.id);
       const effective = jimengSessionService.resolveEffectiveSessions(req.user.id);
       res.json({ success: true, data: { accounts, effective } });
