@@ -2156,12 +2156,24 @@ app.put('/api/settings', (req, res) => {
   }
 });
 
+// 管理员共享即梦账号：admin 和 super_admin 都操作 super_admin(id=1) 的账号池
+function getSessionAccountOwnerId(req) {
+  if (req.user.role === 'admin' || req.user.role === 'super_admin') {
+    // 所有管理员共享超级管理员的账号池
+    const db = getDatabase();
+    const superAdmin = db.prepare("SELECT id FROM users WHERE role = 'super_admin' LIMIT 1").get();
+    return superAdmin ? superAdmin.id : req.user.id;
+  }
+  return req.user.id;
+}
+
 // GET /api/settings/session-accounts - 获取当前用户的 SessionID 账号列表
 app.get('/api/settings/session-accounts', authenticate, (req, res) => {
   try {
     if (req.user.role === 'admin' || req.user.role === 'super_admin') {
-      const accounts = jimengSessionService.listUserAccounts(req.user.id);
-      const effective = jimengSessionService.resolveEffectiveSessions(req.user.id);
+      const ownerId = getSessionAccountOwnerId(req);
+      const accounts = jimengSessionService.listUserAccounts(ownerId);
+      const effective = jimengSessionService.resolveEffectiveSessions(ownerId);
       res.json({ success: true, data: { accounts, effective } });
     } else {
       const db = getDatabase();
@@ -2180,7 +2192,7 @@ app.get('/api/settings/session-accounts', authenticate, (req, res) => {
 // POST /api/settings/session-accounts - 新增 SessionID 账号
 app.post('/api/settings/session-accounts', authenticate, requireAdmin, (req, res) => {
   try {
-    const account = jimengSessionService.createUserAccount(req.user.id, req.body || {});
+    const account = jimengSessionService.createUserAccount(getSessionAccountOwnerId(req), req.body || {});
     res.json({ success: true, data: account });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -2191,7 +2203,7 @@ app.post('/api/settings/session-accounts', authenticate, requireAdmin, (req, res
 app.put('/api/settings/session-accounts/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const account = jimengSessionService.updateUserAccount(
-      req.user.id,
+      getSessionAccountOwnerId(req),
       Number(req.params.id),
       req.body || {}
     );
@@ -2204,7 +2216,7 @@ app.put('/api/settings/session-accounts/:id', authenticate, requireAdmin, (req, 
 // DELETE /api/settings/session-accounts/:id - 删除 SessionID 账号
 app.delete('/api/settings/session-accounts/:id', authenticate, requireAdmin, (req, res) => {
   try {
-    const result = jimengSessionService.deleteUserAccount(req.user.id, Number(req.params.id));
+    const result = jimengSessionService.deleteUserAccount(getSessionAccountOwnerId(req), Number(req.params.id));
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -2214,7 +2226,7 @@ app.delete('/api/settings/session-accounts/:id', authenticate, requireAdmin, (re
 // POST /api/settings/session-accounts/:id/default - 设为默认账号
 app.post('/api/settings/session-accounts/:id/default', authenticate, requireAdmin, (req, res) => {
   try {
-    const account = jimengSessionService.setDefaultAccount(req.user.id, Number(req.params.id));
+    const account = jimengSessionService.setDefaultAccount(getSessionAccountOwnerId(req), Number(req.params.id));
     res.json({ success: true, data: account });
   } catch (error) {
     res.status(400).json({ error: error.message });
