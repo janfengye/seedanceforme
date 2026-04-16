@@ -14,6 +14,7 @@ export type ModelId = 'seedance-2.0' | 'seedance-2.0-fast' | 'seedance-2.0-fast-
 export interface User {
   id: number;
   email: string;
+  username?: string;
   nickname?: string;
   role: 'user' | 'admin';
   status: 'active' | 'disabled';
@@ -24,15 +25,14 @@ export interface User {
 }
 
 export interface LoginCredentials {
-  email: string;
+  username: string;
   password: string;
 }
 
 export interface RegisterCredentials {
-  email: string;
+  username: string;
   password: string;
-  emailCode: string;
-  invitation_code?: string;
+  invitation_code: string;
 }
 
 export interface AuthResponse {

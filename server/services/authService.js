@@ -157,12 +157,12 @@ export function isStrongPassword(password) {
 /**
  * 用户注册
  */
-export async function registerUser(email, password, emailCode) {
+export async function registerUser(username, password) {
   const db = getDatabase();
 
-  // 验证邮箱格式
-  if (!isValidEmail(email)) {
-    throw new Error('邮箱格式不正确');
+  // 验证用户名格式
+  if (!username || !/^[A-Za-z0-9]{2,10}$/.test(username)) {
+    throw new Error('用户名需为 2-10 位英文字母或数字');
   }
 
   // 验证密码强度
@@ -170,31 +170,22 @@ export async function registerUser(email, password, emailCode) {
     throw new Error('密码至少 8 位，需包含数字和字母');
   }
 
-  // 检查邮箱是否已存在
+  // 检查用户名是否已存在
   const existingUser = db.prepare(`
-    SELECT id FROM users WHERE email = ?
-  `).get(email);
+    SELECT id FROM users WHERE username = ?
+  `).get(username);
 
   if (existingUser) {
-    throw new Error('该邮箱已被注册');
+    throw new Error('该用户名已被注册');
   }
 
-  // 验证邮箱验证码
-  if (!emailCode) {
-    throw new Error('请输入邮箱验证码');
-  }
-
-  const verifyResult = await verifyEmailCode(email, emailCode, 'register', true);
-  if (!verifyResult.valid) {
-    throw new Error(verifyResult.message);
-  }
-
-  // 创建用户
+  // 创建用户（email 设为 {username}@local 保持 schema 兼容）
   const passwordHash = hashPassword(password);
+  const email = `${username}@local`;
   const result = db.prepare(`
-    INSERT INTO users (email, password_hash, role, status, credits)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(email, passwordHash, 'user', 'active', 10);
+    INSERT INTO users (email, password_hash, username, role, status, credits)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(email, passwordHash, username, 'user', 'active', 10);
 
   // 创建 session
   const sessionId = generateSessionId();
@@ -207,7 +198,7 @@ export async function registerUser(email, password, emailCode) {
 
   // 获取用户信息
   const user = db.prepare(`
-    SELECT id, email, role, status, credits, created_at
+    SELECT id, email, username, role, status, credits, created_at
     FROM users
     WHERE id = ?
   `).get(result.lastInsertRowid);
@@ -217,6 +208,7 @@ export async function registerUser(email, password, emailCode) {
     user: {
       id: user.id,
       email: user.email,
+      username: user.username,
       role: user.role,
       status: user.status,
       credits: user.credits,
@@ -228,20 +220,15 @@ export async function registerUser(email, password, emailCode) {
 /**
  * 用户登录
  */
-export async function loginUser(email, password) {
+export async function loginUser(username, password) {
   const db = getDatabase();
 
-  // 验证邮箱格式
-  if (!isValidEmail(email)) {
-    throw new Error('邮箱格式不正确');
-  }
-
-  // 查找用户
+  // 查找用户（支持 username 登录）
   const user = db.prepare(`
-    SELECT id, email, password_hash, role, status, credits
+    SELECT id, email, username, password_hash, role, status, credits
     FROM users
-    WHERE email = ?
-  `).get(email);
+    WHERE username = ?
+  `).get(username);
 
   if (!user) {
     throw new Error('用户不存在');
@@ -273,6 +260,7 @@ export async function loginUser(email, password) {
     user: {
       id: user.id,
       email: user.email,
+      username: user.username,
       role: user.role,
       status: user.status,
       credits: user.credits
@@ -296,7 +284,7 @@ export async function getCurrentUser(sessionId) {
   const db = getDatabase();
 
   const session = db.prepare(`
-    SELECT s.*, u.id as user_id, u.email, u.role, u.status, u.credits
+    SELECT s.*, u.id as user_id, u.email, u.username, u.role, u.status, u.credits
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.session_id = ? AND s.expires_at > datetime('now')
@@ -309,6 +297,7 @@ export async function getCurrentUser(sessionId) {
   return {
     id: session.user_id,
     email: session.email,
+    username: session.username,
     role: session.role,
     status: session.status,
     credits: session.credits

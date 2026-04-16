@@ -2808,10 +2808,10 @@ app.delete('/api/download/tasks/:id', (req, res) => {
 // POST /api/auth/register - 用户注册
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, emailCode, invitation_code } = req.body;
+    const { username, password, invitation_code } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: '邮箱和密码不能为空' });
+    if (!username || !password) {
+      return res.status(400).json({ error: '用户名和密码不能为空' });
     }
 
     if (!invitation_code) {
@@ -2844,7 +2844,7 @@ app.post('/api/auth/register', async (req, res) => {
     // Register user (rollback slot on failure)
     let result;
     try {
-      result = await authService.registerUser(email, password, emailCode);
+      result = await authService.registerUser(username, password);
     } catch (err) {
       db.prepare('UPDATE invitation_codes SET used_count = used_count - 1 WHERE id = ?').run(codeRecord.id);
       throw err;
@@ -2862,13 +2862,13 @@ app.post('/api/auth/register', async (req, res) => {
 // POST /api/auth/login - 用户登录
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { username, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: '邮箱和密码不能为空' });
+    if (!username || !password) {
+      return res.status(400).json({ error: '用户名和密码不能为空' });
     }
 
-    const result = await authService.loginUser(email, password);
+    const result = await authService.loginUser(username, password);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(401).json({ error: error.message });
@@ -2893,8 +2893,8 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
     // Enrich user with nickname from DB
     const db = getDatabase();
-    const userRow = db.prepare('SELECT nickname FROM users WHERE id = ?').get(req.user.id);
-    const user = { ...req.user, nickname: userRow?.nickname || '' };
+    const userRow = db.prepare('SELECT nickname, username FROM users WHERE id = ?').get(req.user.id);
+    const user = { ...req.user, nickname: userRow?.nickname || '', username: userRow?.username || '' };
     res.json({ success: true, data: { user } });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -3322,7 +3322,7 @@ app.get('/api/admin/invitation-codes/:id/usage', authenticate, requireAdmin, (re
   try {
     const db = getDatabase();
     const usage = db.prepare(`
-      SELECT iu.*, u.email as user_email
+      SELECT iu.*, u.email as user_email, u.username
       FROM invitation_usage iu
       LEFT JOIN users u ON iu.user_id = u.id
       WHERE iu.code_id = ?
@@ -3342,7 +3342,7 @@ app.get('/api/admin/invitation-codes/:id/usage', authenticate, requireAdmin, (re
 app.get('/api/user/profile', authenticate, (req, res) => {
   try {
     const db = getDatabase();
-    const user = db.prepare('SELECT id, email, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, email, username, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
     res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -3371,7 +3371,7 @@ app.put('/api/user/profile', authenticate, (req, res) => {
     }
     
     db.prepare('UPDATE users SET nickname = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nickname, req.user.id);
-    const user = db.prepare('SELECT id, email, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user = db.prepare('SELECT id, email, username, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
     res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -185,7 +185,7 @@ export default function AdminPage() {
   };
 
   const handleCopyCode = (code: string, id: number) => {
-    navigator.clipboard.writeText(code);
+    navigator.clipboard.writeText(`${window.location.origin}/register?code=${code}`);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -440,7 +440,7 @@ export default function AdminPage() {
                               onClick={() => handleCopyCode(code.code, code.id)}
                               className="text-gray-500 hover:text-purple-400 transition-colors text-xs"
                             >
-                              {copiedId === code.id ? '已复制' : '复制'}
+                              {copiedId === code.id ? '已复制链接' : '复制链接'}
                             </button>
                           </div>
                         </td>

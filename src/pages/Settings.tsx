@@ -691,7 +691,7 @@ export default function SettingsPage() {
                   download_path: e.target.value,
                 }))
               }
-              placeholder="留空则使用默认路径：~/Videos/Seedance"
+              placeholder="留空则使用默认路径：~/Videos/Team"
               className="w-full bg-[#0f111a] border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
             />
             <p className="text-xs text-gray-500 mt-2">

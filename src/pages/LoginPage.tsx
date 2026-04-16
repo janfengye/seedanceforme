@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { login, checkEmailStatus } from '../services/authService';
+import { login } from '../services/authService';
 import type { User } from '../types';
-import { MailIcon, LockIcon, EyeIcon, EyeOffIcon, SparkleIcon } from '../components/Icons';
+import { LockIcon, EyeIcon, EyeOffIcon, SparkleIcon, UserIcon } from '../components/Icons';
 
 interface LoginFormData {
-  email: string;
+  username: string;
   password: string;
 }
 
@@ -16,7 +16,7 @@ interface LoginPageProps {
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<LoginFormData>({
-    email: '',
+    username: '',
     password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -39,19 +39,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
   };
 
-  const handleEmailBlur = async () => {
-    if (formData.email) {
-      try {
-        const result = await checkEmailStatus(formData.email);
-        if (!result.isRegistered) {
-          setError('该邮箱未注册，请先注册账号');
-        }
-      } catch {
-        // 忽略错误
-      }
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0f111a] via-[#1a1d2e] to-[#0f111a] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -60,8 +47,8 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 mb-4 shadow-lg shadow-purple-500/30">
             <SparkleIcon className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Seedance 2.0</h1>
-          <p className="text-gray-400">AI 视频生成平台</p>
+          <h1 className="text-3xl font-bold text-white mb-2">我们的团队</h1>
+          <p className="text-gray-400">团队协作平台</p>
         </div>
 
         {/* 登录表单 */}
@@ -75,22 +62,21 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* 邮箱输入 */}
+            {/* 用户名输入 */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                邮箱
+                用户名
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <MailIcon className="w-5 h-5 text-gray-500" />
+                  <UserIcon className="w-5 h-5 text-gray-500" />
                 </div>
                 <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  onBlur={handleEmailBlur}
+                  type="text"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   className="w-full pl-12 pr-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                  placeholder="请输入邮箱"
+                  placeholder="请输入用户名"
                   required
                 />
               </div>
@@ -154,7 +140,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           <div className="mt-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
             <p className="text-xs text-gray-400 text-center mb-2">测试账号</p>
             <div className="flex justify-center gap-4 text-xs text-gray-500">
-              <span>管理员：admin@seedance.com</span>
+              <span>管理员：admin</span>
               <span>密码：admin123456</span>
             </div>
           </div>

@@ -117,7 +117,7 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
             </div>
             {expanded && (
               <span className="text-lg font-bold text-white whitespace-nowrap">
-                Seedance 2.0
+                我们的团队
               </span>
             )}
           </div>
@@ -169,7 +169,7 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-white truncate">
-                    {currentUser?.nickname || currentUser?.email || '用户'}
+                    {currentUser?.nickname || currentUser?.username || '用户'}
                   </p>
                   <p className="text-xs text-gray-500">
                     {currentUser?.role === 'admin' ? '管理员' : '普通用户'}
@@ -210,7 +210,7 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
             <SparkleIcon className="w-5 h-5 text-white" />
           </div>
-          <span className="text-lg font-bold text-white">Seedance 2.0</span>
+          <span className="text-lg font-bold text-white">我们的团队</span>
         </div>
         <div className="w-10" /> {/* 占位 */}
       </header>

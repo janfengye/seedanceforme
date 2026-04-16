@@ -1,15 +1,13 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { register, checkEmailStatus, sendEmailCode, verifyEmailCode } from '../services/authService';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { register } from '../services/authService';
 import type { User } from '../types';
-import { MailIcon, LockIcon, EyeIcon, EyeOffIcon, SparkleIcon, CheckIcon, ShieldIcon } from '../components/Icons';
+import { LockIcon, EyeIcon, EyeOffIcon, SparkleIcon, ShieldIcon, UserIcon } from '../components/Icons';
 
 interface RegisterFormData {
-  invitationCode: string;
-  email: string;
+  username: string;
   password: string;
   confirmPassword: string;
-  verificationCode: string;
 }
 
 interface RegisterPageProps {
@@ -18,20 +16,25 @@ interface RegisterPageProps {
 
 export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const invitationCode = searchParams.get('code') || '';
+
   const [formData, setFormData] = useState<RegisterFormData>({
-    invitationCode: '',
-    email: '',
+    username: '',
     password: '',
     confirmPassword: '',
-    verificationCode: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sendingCode, setSendingCode] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [emailVerified, setEmailVerified] = useState(false);
+
+  const validateUsername = (username: string): { valid: boolean; message: string } => {
+    if (!username) return { valid: false, message: '请输入用户名' };
+    if (!/^[A-Za-z0-9]{2,10}$/.test(username)) {
+      return { valid: false, message: '用户名需为 2-10 位英文字母或数字' };
+    }
+    return { valid: true, message: '' };
+  };
 
   const validatePassword = (password: string): { valid: boolean; message: string } => {
     if (password.length < 8) {
@@ -45,78 +48,13 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
     return { valid: true, message: '' };
   };
 
-  const handleEmailBlur = async () => {
-    if (formData.email) {
-      try {
-        const result = await checkEmailStatus(formData.email);
-        if (result.isRegistered) {
-          setError('该邮箱已被注册，请直接登录');
-        } else {
-          setError('');
-        }
-      } catch {
-        // 忽略错误
-      }
-    }
-  };
-
-  const handleSendCode = async () => {
-    if (!formData.email) {
-      setError('请先输入邮箱');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) {
-      setError('请输入有效的邮箱地址');
-      return;
-    }
-
-    setSendingCode(true);
-    setError('');
-
-    try {
-      await sendEmailCode(formData.email);
-      setCodeSent(true);
-      setCountdown(60);
-
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '发送验证码失败');
-    } finally {
-      setSendingCode(false);
-    }
-  };
-
-  const handleVerifyCode = async () => {
-    if (!formData.verificationCode) {
-      setError('请输入验证码');
-      return;
-    }
-
-    try {
-      await verifyEmailCode(formData.email, formData.verificationCode);
-      setEmailVerified(true);
-      setError('邮箱验证成功，请设置密码');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '验证码错误');
-    }
-  };
-
-  const handleVerifyCodeAndSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!formData.invitationCode) {
-      setError('请输入邀请码');
+    const usernameValidation = validateUsername(formData.username);
+    if (!usernameValidation.valid) {
+      setError(usernameValidation.message);
       return;
     }
 
@@ -131,19 +69,13 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
       return;
     }
 
-    if (!emailVerified) {
-      setError('请先获取并验证邮箱验证码');
-      return;
-    }
-
     setLoading(true);
 
     try {
       const result = await register({
-        email: formData.email,
+        username: formData.username,
         password: formData.password,
-        emailCode: formData.verificationCode,
-        invitation_code: formData.invitationCode,
+        invitation_code: invitationCode,
       });
       onRegisterSuccess(result.user);
       navigate('/');
@@ -154,11 +86,31 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
     }
   };
 
-  const getCountdownText = () => {
-    if (sendingCode) return '发送中...';
-    if (codeSent && countdown > 0) return `${countdown}秒`;
-    return '获取验证码';
-  };
+  // No invitation code in URL — show prompt
+  if (!invitationCode) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#0f111a] via-[#1a1d2e] to-[#0f111a] flex items-center justify-center p-4">
+        <div className="w-full max-w-md text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 mb-4 shadow-lg shadow-purple-500/30">
+            <SparkleIcon className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-2">我们的团队</h1>
+          <p className="text-gray-400 mb-8">团队协作平台</p>
+          <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl p-8 shadow-xl">
+            <ShieldIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-300 mb-2">请通过管理员分享的邀请链接注册</p>
+            <p className="text-gray-500 text-sm">如果你已有账号，可以直接登录</p>
+            <button
+              onClick={() => navigate('/login')}
+              className="mt-6 px-6 py-2.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 font-medium rounded-xl border border-purple-500/30 transition-all"
+            >
+              前往登录
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0f111a] via-[#1a1d2e] to-[#0f111a] flex items-center justify-center p-4">
@@ -168,8 +120,8 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 mb-4 shadow-lg shadow-purple-500/30">
             <SparkleIcon className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Seedance 2.0</h1>
-          <p className="text-gray-400">AI 视频生成平台</p>
+          <h1 className="text-3xl font-bold text-white mb-2">我们的团队</h1>
+          <p className="text-gray-400">团队协作平台</p>
         </div>
 
         {/* 注册表单 */}
@@ -182,8 +134,8 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
             </div>
           )}
 
-          <form onSubmit={handleVerifyCodeAndSubmit} className="space-y-5">
-            {/* 邀请码输入 */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* 邀请码（只读） */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 邀请码
@@ -194,86 +146,32 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
                 </div>
                 <input
                   type="text"
-                  value={formData.invitationCode}
-                  onChange={(e) => setFormData({ ...formData, invitationCode: e.target.value.toUpperCase() })}
-                  className="w-full pl-12 pr-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all font-mono tracking-wider"
-                  placeholder="请输入 8 位邀请码"
-                  maxLength={8}
-                  required
+                  value={invitationCode}
+                  readOnly
+                  className="w-full pl-12 pr-4 py-3 bg-[#0a0c14] border border-gray-700 rounded-xl text-gray-400 font-mono tracking-wider cursor-not-allowed"
                 />
               </div>
             </div>
 
-            {/* 邮箱输入 */}
+            {/* 用户名输入 */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                邮箱
+                用户名
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <MailIcon className="w-5 h-5 text-gray-500" />
+                  <UserIcon className="w-5 h-5 text-gray-500" />
                 </div>
                 <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  onBlur={handleEmailBlur}
+                  type="text"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   className="w-full pl-12 pr-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                  placeholder="请输入邮箱"
+                  placeholder="2-10 位英文字母或数字"
+                  maxLength={10}
                   required
                 />
               </div>
-            </div>
-
-            {/* 验证码输入 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                邮箱验证码
-              </label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={formData.verificationCode}
-                    onChange={(e) => setFormData({ ...formData, verificationCode: e.target.value })}
-                    className="w-full px-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                    placeholder="6 位验证码"
-                    maxLength={6}
-                    required
-                  />
-                  {emailVerified && (
-                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
-                      <CheckIcon className="w-5 h-5 text-green-500" />
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleVerifyCode}
-                  disabled={sendingCode || !formData.verificationCode || emailVerified}
-                  className="px-4 py-3 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 font-medium rounded-xl border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {sendingCode ? '验证中...' : emailVerified ? '已验证' : '验证'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSendCode}
-                  disabled={sendingCode || !formData.email}
-                  className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-medium rounded-xl border border-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {getCountdownText()}
-                </button>
-              </div>
-              {codeSent && !emailVerified && (
-                <p className="mt-1 text-xs text-gray-500">
-                  请输入收到的 6 位验证码，然后点击「验证」按钮
-                </p>
-              )}
-              {emailVerified && (
-                <p className="mt-1 text-xs text-green-500">
-                  邮箱验证通过，请设置密码后点击「创建账号」
-                </p>
-              )}
             </div>
 
             {/* 密码输入 */}

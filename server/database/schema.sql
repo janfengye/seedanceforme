@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   last_check_in_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  username TEXT,
 );
 
 -- 会话表
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS system_config (
   value TEXT,
   description TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  username TEXT,
 );
 
 -- 创建索引
@@ -68,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_email_verification_codes_purpose ON email_verific
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_email_verification_codes_email ON email_verification_codes(email);
@@ -75,8 +78,8 @@ CREATE INDEX IF NOT EXISTS idx_email_verification_codes_expires_at ON email_veri
 
 
 -- 插入默认管理员账户 (密码：admin123456)
-INSERT OR IGNORE INTO users (email, password_hash, role, status, credits)
-VALUES ('admin@seedance.com', '9e5f160f7992eda2696de915f2f8f90bb3c372555bf686a1f0363ea5df9511ff', 'admin', 'active', 1000);
+INSERT OR IGNORE INTO users (email, password_hash, username, role, status, credits)
+VALUES ('admin@seedance.com', '9e5f160f7992eda2696de915f2f8f90bb3c372555bf686a1f0363ea5df9511ff', 'admin', 'admin', 'active', 1000);
 
 -- ============================================
 -- 原有业务表结构
@@ -91,6 +94,7 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   settings_json TEXT -- 项目级设置（模型、比例、时长等）
+  username TEXT,
 );
 
 -- 任务表
@@ -125,6 +129,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   retry_count INTEGER DEFAULT 0,
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
   FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+  username TEXT,
 );
 
 -- 任务素材表
@@ -162,6 +167,7 @@ CREATE TABLE IF NOT EXISTS jimeng_session_accounts (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE(user_id, session_id)
+  username TEXT,
 );
 
 -- 全局设置表
@@ -169,6 +175,7 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  username TEXT,
 );
 
 

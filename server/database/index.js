@@ -102,6 +102,12 @@ function shouldSkipMigration(db, file) {
     return columnNames.has('nickname');
   }
 
+  if (file === '20260416_add_username.sql') {
+    const columns = db.prepare(`PRAGMA table_info(users)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return columnNames.has('username');
+  }
+
   return false;
 }
 
