@@ -8,6 +8,7 @@ import AdminPage from './pages/AdminPage';
 import SingleTaskPage from './pages/SingleTaskPage';
 import BatchManagementPage from './pages/BatchManagement';
 import SettingsPage from './pages/Settings';
+import ProfilePage from './pages/ProfilePage';
 import DownloadManagementPage from './pages/DownloadManagement';
 import type { User } from './types';
 import { getCurrentUser } from './services/authService';
@@ -76,6 +77,9 @@ function AppContent() {
     loadUser();
   }, []);
 
+  const handleUserUpdate = (user: User) => {
+    setCurrentUser(user);
+  };
   const handleLogout = () => {
     setCurrentUser(null);
   };
@@ -158,6 +162,16 @@ function AppContent() {
             <ProtectedRoute currentUser={currentUser}>
               <MainLayout currentUser={currentUser} onLogout={handleLogout}>
                 <SettingsPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute currentUser={currentUser}>
+              <MainLayout currentUser={currentUser} onLogout={handleLogout}>
+                <ProfilePage currentUser={currentUser} onUserUpdate={handleUserUpdate} />
               </MainLayout>
             </ProtectedRoute>
           }

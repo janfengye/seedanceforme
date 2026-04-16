@@ -6,8 +6,14 @@ import {
   updateUserCredits,
   resetUserPassword,
 } from '../services/authService';
-import type { User } from '../types';
-import { UsersIcon, ShieldIcon, CheckIcon, SparkleIcon } from '../components/Icons';
+import {
+  getInvitationCodes,
+  generateInvitationCodes,
+  updateInvitationCode,
+  deleteInvitationCode,
+} from '../services/adminService';
+import type { User, InvitationCode } from '../types';
+import { UsersIcon, ShieldIcon, CheckIcon, SparkleIcon, CloseIcon, PlusIcon } from '../components/Icons';
 
 interface SystemStats {
   totalUsers: number;
@@ -28,12 +34,20 @@ export default function AdminPage() {
   const [totalUsers, setTotalUsers] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterRole, setFilterRole] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'users' | 'invitations'>('users');
 
   // 弹窗状态
   const [showUserModal, setShowUserModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [editCredits, setEditCredits] = useState('');
   const [editOperation, setEditOperation] = useState<'set' | 'add' | 'subtract'>('set');
+
+  // 邀请码状态
+  const [invitationCodes, setInvitationCodes] = useState<InvitationCode[]>([]);
+  const [invLoading, setInvLoading] = useState(false);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateForm, setGenerateForm] = useState({ count: 1, max_uses: 1, note: '' });
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const loadStats = async () => {
     try {
@@ -63,6 +77,18 @@ export default function AdminPage() {
     }
   };
 
+  const loadInvitationCodes = async () => {
+    try {
+      setInvLoading(true);
+      const codes = await getInvitationCodes();
+      setInvitationCodes(codes);
+    } catch (err) {
+      console.error('加载邀请码失败:', err);
+    } finally {
+      setInvLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadStats();
     loadUsers();
@@ -71,6 +97,12 @@ export default function AdminPage() {
   useEffect(() => {
     loadUsers(1);
   }, [filterStatus, filterRole]);
+
+  useEffect(() => {
+    if (activeTab === 'invitations' && invitationCodes.length === 0) {
+      loadInvitationCodes();
+    }
+  }, [activeTab]);
 
   const handleStatusChange = async (userId: number, newStatus: 'active' | 'disabled') => {
     try {
@@ -122,6 +154,42 @@ export default function AdminPage() {
     }
   };
 
+  const handleGenerateCodes = async () => {
+    try {
+      await generateInvitationCodes(generateForm);
+      setShowGenerateModal(false);
+      setGenerateForm({ count: 1, max_uses: 1, note: '' });
+      loadInvitationCodes();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '生成邀请码失败');
+    }
+  };
+
+  const handleToggleCode = async (code: InvitationCode) => {
+    try {
+      await updateInvitationCode(code.id, { is_active: code.is_active ? 0 : 1 });
+      loadInvitationCodes();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '更新邀请码失败');
+    }
+  };
+
+  const handleDeleteCode = async (id: number) => {
+    if (!confirm('确定要删除这个邀请码吗？')) return;
+    try {
+      await deleteInvitationCode(id);
+      loadInvitationCodes();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除邀请码失败');
+    }
+  };
+
+  const handleCopyCode = (code: string, id: number) => {
+    navigator.clipboard.writeText(code);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const StatCard = ({ title, value, icon: Icon, color }: {
     title: string;
     value: string | number;
@@ -153,160 +221,262 @@ export default function AdminPage() {
         {/* 统计卡片 */}
         {stats && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            <StatCard
-              title="总用户数"
-              value={stats.totalUsers}
-              icon={UsersIcon}
-              color="bg-gradient-to-br from-blue-500 to-cyan-500"
-            />
-            <StatCard
-              title="活跃用户"
-              value={stats.activeUsers}
-              icon={CheckIcon}
-              color="bg-gradient-to-br from-green-500 to-emerald-500"
-            />
-            <StatCard
-              title="总项目数"
-              value={stats.totalProjects}
-              icon={SparkleIcon}
-              color="bg-gradient-to-br from-purple-500 to-pink-500"
-            />
-            <StatCard
-              title="总任务数"
-              value={stats.totalTasks}
-              icon={ShieldIcon}
-              color="bg-gradient-to-br from-amber-500 to-orange-500"
-            />
-            <StatCard
-              title="今日签到"
-              value={stats.todayCheckIns}
-              icon={CheckIcon}
-              color="bg-gradient-to-br from-rose-500 to-red-500"
-            />
-            <StatCard
-              title="发放积分"
-              value={stats.totalCreditsIssued}
-              icon={SparkleIcon}
-              color="bg-gradient-to-br from-indigo-500 to-violet-500"
-            />
+            <StatCard title="总用户数" value={stats.totalUsers} icon={UsersIcon} color="bg-gradient-to-br from-blue-500 to-cyan-500" />
+            <StatCard title="活跃用户" value={stats.activeUsers} icon={CheckIcon} color="bg-gradient-to-br from-green-500 to-emerald-500" />
+            <StatCard title="总项目数" value={stats.totalProjects} icon={SparkleIcon} color="bg-gradient-to-br from-purple-500 to-pink-500" />
+            <StatCard title="总任务数" value={stats.totalTasks} icon={ShieldIcon} color="bg-gradient-to-br from-amber-500 to-orange-500" />
+            <StatCard title="今日签到" value={stats.todayCheckIns} icon={CheckIcon} color="bg-gradient-to-br from-rose-500 to-red-500" />
+            <StatCard title="发放积分" value={stats.totalCreditsIssued} icon={SparkleIcon} color="bg-gradient-to-br from-indigo-500 to-violet-500" />
           </div>
         )}
 
-        {/* 用户列表 */}
-        <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-gray-800">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <h2 className="text-xl font-semibold text-white">用户管理</h2>
-              <div className="flex items-center gap-3">
-                <select
-                  value={filterRole}
-                  onChange={(e) => setFilterRole(e.target.value)}
-                  className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="all">所有角色</option>
-                  <option value="user">普通用户</option>
-                  <option value="admin">管理员</option>
-                </select>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="all">所有状态</option>
-                  <option value="active">正常</option>
-                  <option value="disabled">禁用</option>
-                </select>
-              </div>
-            </div>
-          </div>
+        {/* 标签栏 */}
+        <div className="flex gap-1 mb-6 bg-[#1c1f2e] border border-gray-800 rounded-xl p-1 w-fit">
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'users'
+                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            用户管理
+          </button>
+          <button
+            onClick={() => setActiveTab('invitations')}
+            className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'invitations'
+                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            邀请码管理
+          </button>
+        </div>
 
-          {loading ? (
-            <div className="p-12 text-center">
-              <div className="inline-block animate-spin text-purple-500">
-                <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeWidth={2} strokeLinecap="round" />
-                </svg>
+        {/* 用户管理 Tab */}
+        {activeTab === 'users' && (
+          <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-800">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl font-semibold text-white">用户管理</h2>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={filterRole}
+                    onChange={(e) => setFilterRole(e.target.value)}
+                    className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="all">所有角色</option>
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
+                  </select>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="all">所有状态</option>
+                    <option value="active">正常</option>
+                    <option value="disabled">禁用</option>
+                  </select>
+                </div>
               </div>
-              <p className="text-gray-400 mt-4">加载中...</p>
             </div>
-          ) : error ? (
-            <div className="p-12 text-center text-red-400">{error}</div>
-          ) : (
-            <>
+
+            {loading ? (
+              <div className="p-12 text-center">
+                <div className="inline-block animate-spin text-purple-500">
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeWidth={2} strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="text-gray-400 mt-4">加载中...</p>
+              </div>
+            ) : error ? (
+              <div className="p-12 text-center text-red-400">{error}</div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-[#0f111a]">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">ID</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">邮箱</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">角色</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">状态</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">积分</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">注册时间</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {users.map((user) => (
+                        <tr key={user.id} className="hover:bg-[#0f111a]/50">
+                          <td className="px-6 py-4 text-sm text-gray-400">#{user.id}</td>
+                          <td className="px-6 py-4 text-sm text-white">{user.email}</td>
+                          <td className="px-6 py-4 text-sm">
+                            <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                              user.role === 'admin'
+                                ? 'bg-amber-500/20 text-amber-400'
+                                : 'bg-gray-500/20 text-gray-400'
+                            }`}>
+                              {user.role === 'admin' ? '管理员' : '普通用户'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                              user.status === 'active'
+                                ? 'bg-green-500/20 text-green-400'
+                                : 'bg-red-500/20 text-red-400'
+                            }`}>
+                              {user.status === 'active' ? '正常' : '禁用'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-white">{user.credits}</td>
+                          <td className="px-6 py-4 text-sm text-gray-400">
+                            {new Date(user.createdAt!).toLocaleDateString('zh-CN')}
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleStatusChange(
+                                  user.id,
+                                  user.status === 'active' ? 'disabled' : 'active'
+                                )}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                  user.status === 'active'
+                                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                    : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                                }`}
+                              >
+                                {user.status === 'active' ? '禁用' : '启用'}
+                              </button>
+                              <button
+                                onClick={() => handleOpenUserModal(user)}
+                                className="px-3 py-1.5 bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 rounded-lg text-xs font-medium transition-all"
+                              >
+                                编辑
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 分页 */}
+                <div className="p-6 border-t border-gray-800 flex items-center justify-between">
+                  <p className="text-sm text-gray-400">
+                    共 {totalUsers} 个用户，第 {currentPage} / {totalPages} 页
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => loadUsers(currentPage - 1)}
+                      disabled={currentPage <= 1}
+                      className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      上一页
+                    </button>
+                    <button
+                      onClick={() => loadUsers(currentPage + 1)}
+                      disabled={currentPage >= totalPages}
+                      className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 邀请码管理 Tab */}
+        {activeTab === 'invitations' && (
+          <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-800 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-white">邀请码管理</h2>
+              <button
+                onClick={() => setShowGenerateModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium text-sm transition-all hover:from-purple-600 hover:to-pink-600"
+              >
+                <PlusIcon className="w-4 h-4" />
+                生成邀请码
+              </button>
+            </div>
+
+            {invLoading ? (
+              <div className="p-12 text-center">
+                <div className="inline-block animate-spin text-purple-500">
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeWidth={2} strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="text-gray-400 mt-4">加载中...</p>
+              </div>
+            ) : invitationCodes.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">暂无邀请码，点击上方按钮生成</div>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-[#0f111a]">
                     <tr>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        ID
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        邮箱
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        角色
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        状态
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        积分
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        注册时间
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">
-                        操作
-                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">邀请码</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">使用次数</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">状态</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">备注</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">创建时间</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {users.map((user) => (
-                      <tr key={user.id} className="hover:bg-[#0f111a]/50">
-                        <td className="px-6 py-4 text-sm text-gray-400">#{user.id}</td>
-                        <td className="px-6 py-4 text-sm text-white">{user.email}</td>
+                    {invitationCodes.map((code) => (
+                      <tr key={code.id} className="hover:bg-[#0f111a]/50">
                         <td className="px-6 py-4 text-sm">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                            user.role === 'admin'
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-gray-500/20 text-gray-400'
-                          }`}>
-                            {user.role === 'admin' ? '管理员' : '普通用户'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-white tracking-wider">{code.code}</span>
+                            <button
+                              onClick={() => handleCopyCode(code.code, code.id)}
+                              className="text-gray-500 hover:text-purple-400 transition-colors text-xs"
+                            >
+                              {copiedId === code.id ? '已复制' : '复制'}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-400">
+                          {code.actual_used_count ?? code.used_count} / {code.max_uses}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                            user.status === 'active'
+                            code.is_active
                               ? 'bg-green-500/20 text-green-400'
                               : 'bg-red-500/20 text-red-400'
                           }`}>
-                            {user.status === 'active' ? '正常' : '禁用'}
+                            {code.is_active ? '启用' : '禁用'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-white">{user.credits}</td>
+                        <td className="px-6 py-4 text-sm text-gray-400">{code.note || '-'}</td>
                         <td className="px-6 py-4 text-sm text-gray-400">
-                          {new Date(user.createdAt!).toLocaleDateString('zh-CN')}
+                          {new Date(code.created_at).toLocaleDateString('zh-CN')}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleStatusChange(
-                                user.id,
-                                user.status === 'active' ? 'disabled' : 'active'
-                              )}
+                              onClick={() => handleToggleCode(code)}
                               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                                user.status === 'active'
+                                code.is_active
                                   ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                                   : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                               }`}
                             >
-                              {user.status === 'active' ? '禁用' : '启用'}
+                              {code.is_active ? '禁用' : '启用'}
                             </button>
                             <button
-                              onClick={() => handleOpenUserModal(user)}
-                              className="px-3 py-1.5 bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 rounded-lg text-xs font-medium transition-all"
+                              onClick={() => handleDeleteCode(code.id)}
+                              className="px-3 py-1.5 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg text-xs font-medium transition-all"
                             >
-                              编辑
+                              删除
                             </button>
                           </div>
                         </td>
@@ -315,32 +485,9 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
-
-              {/* 分页 */}
-              <div className="p-6 border-t border-gray-800 flex items-center justify-between">
-                <p className="text-sm text-gray-400">
-                  共 {totalUsers} 个用户，第 {currentPage} / {totalPages} 页
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => loadUsers(currentPage - 1)}
-                    disabled={currentPage <= 1}
-                    className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    上一页
-                  </button>
-                  <button
-                    onClick={() => loadUsers(currentPage + 1)}
-                    disabled={currentPage >= totalPages}
-                    className="px-4 py-2 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    下一页
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* 用户编辑弹窗 */}
         {showUserModal && selectedUser && (
@@ -394,6 +541,69 @@ export default function AdminPage() {
                     className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium transition-all"
                   >
                     保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 生成邀请码弹窗 */}
+        {showGenerateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-white">生成邀请码</h3>
+                <button onClick={() => setShowGenerateModal(false)} className="text-gray-400 hover:text-white">
+                  <CloseIcon className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">生成数量</label>
+                  <input
+                    type="number"
+                    value={generateForm.count}
+                    onChange={(e) => setGenerateForm({ ...generateForm, count: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    min="1"
+                    max="50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">每码最大使用次数</label>
+                  <input
+                    type="number"
+                    value={generateForm.max_uses}
+                    onChange={(e) => setGenerateForm({ ...generateForm, max_uses: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    min="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">备注（可选）</label>
+                  <input
+                    type="text"
+                    value={generateForm.note}
+                    onChange={(e) => setGenerateForm({ ...generateForm, note: e.target.value })}
+                    className="w-full px-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="例如：内测用户第一批"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowGenerateModal(false)}
+                    className="flex-1 px-4 py-3 bg-[#0f111a] border border-gray-700 text-white hover:bg-gray-800 rounded-xl font-medium transition-all"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleGenerateCodes}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium transition-all"
+                  >
+                    生成
                   </button>
                 </div>
               </div>

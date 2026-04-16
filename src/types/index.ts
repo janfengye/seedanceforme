@@ -14,6 +14,7 @@ export type ModelId = 'seedance-2.0' | 'seedance-2.0-fast' | 'seedance-2.0-fast-
 export interface User {
   id: number;
   email: string;
+  nickname?: string;
   role: 'user' | 'admin';
   status: 'active' | 'disabled';
   credits: number;
@@ -31,6 +32,7 @@ export interface RegisterCredentials {
   email: string;
   password: string;
   emailCode: string;
+  invitation_code?: string;
 }
 
 export interface AuthResponse {
@@ -71,12 +73,20 @@ export interface UploadedImage {
   index: number;
 }
 
+export interface UploadedAudio {
+  id: string;
+  file: File;
+  name: string;
+  index: number;
+}
+
 export interface GenerateVideoRequest {
   prompt: string;
   model: ModelId;
   ratio: AspectRatio;
   duration: Duration;
   files: File[];
+  audioFiles?: File[];
 }
 
 export interface VideoGenerationResponse {
@@ -437,4 +447,30 @@ export interface DownloadTaskList {
   total: number;
   page: number;
   pageSize: number;
+}
+
+// ============================================================
+// 邀请码类型
+// ============================================================
+
+export interface InvitationCode {
+  id: number;
+  code: string;
+  created_by: number;
+  creator_email?: string;
+  max_uses: number;
+  used_count: number;
+  actual_used_count?: number;
+  is_active: number;
+  note: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface InvitationUsage {
+  id: number;
+  code_id: number;
+  user_id: number;
+  user_email?: string;
+  used_at: string;
 }

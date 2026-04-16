@@ -5,7 +5,7 @@ import { RATIO_OPTIONS, DURATION_OPTIONS, MODEL_OPTIONS, type JimengSessionAccou
 import { PlusIcon, SparkleIcon, CheckIcon } from '../components/Icons';
 
 export default function SettingsPage() {
-  const { state, updateSettingsAction } = useApp();
+  const { state, updateSettingsAction, currentUser } = useApp();
   const { settings } = state;
 
   const [localSettings, setLocalSettings] = useState({
@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null);
   const [testTargetId, setTestTargetId] = useState<number | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const [accountSummary, setAccountSummary] = useState({ total: 0, available: 0 });
 
   const sortAccounts = (accounts: JimengSessionAccount[]) => (
     [...accounts].sort((a, b) => {
@@ -71,7 +72,11 @@ export default function SettingsPage() {
   const loadSessionAccounts = async () => {
     try {
       const data = await settingsService.getSessionAccounts();
-      setSessionAccounts(sortAccounts(data.accounts || []));
+      if ('summary' in data && data.summary) {
+        setAccountSummary(data.summary);
+      } else {
+        setSessionAccounts(sortAccounts(data.accounts || []));
+      }
     } catch (error) {
       console.error('加载 SessionID 列表失败:', error);
     }
@@ -245,6 +250,7 @@ export default function SettingsPage() {
       <div className="max-w-4xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">全局设置</h1>
 
+        {currentUser?.role === 'admin' ? (<>
         {/* SessionID 账号管理 - 移到最前面 */}
         <div className="bg-[#1c1f2e] rounded-xl p-6 mb-6 border border-gray-800">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
@@ -445,6 +451,28 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+        </>
+        ) : (
+        <div className="bg-[#1c1f2e] rounded-xl p-6 mb-6 border border-gray-800">
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <SparkleIcon className="w-5 h-5 text-purple-400" />
+            即梦账号状态
+          </h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-[#0f111a] rounded-lg p-4 text-center">
+              <p className="text-2xl font-bold text-white">{accountSummary.total}</p>
+              <p className="text-sm text-gray-400 mt-1">总账号数</p>
+            </div>
+            <div className="bg-[#0f111a] rounded-lg p-4 text-center">
+              <p className="text-2xl font-bold text-green-400">{accountSummary.available}</p>
+              <p className="text-sm text-gray-400 mt-1">可用账号</p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-4">
+            即梦账号由管理员统一管理。如需添加账号，请联系管理员。
+          </p>
+        </div>
+        )}
 
         {/* 模型设置 */}
         <div className="bg-[#1c1f2e] rounded-xl p-6 mb-6 border border-gray-800">

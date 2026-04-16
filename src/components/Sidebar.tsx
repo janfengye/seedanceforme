@@ -62,6 +62,12 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
       icon: DownloadIcon,
     },
     {
+      id: 'PROFILE',
+      label: '个人设置',
+      path: '/profile',
+      icon: UserIcon,
+    },
+    {
       id: 'SETTINGS',
       label: '设置',
       path: '/settings',
@@ -158,12 +164,12 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
           {expanded ? (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                  <UserIcon className="w-5 h-5 text-white" />
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm">
+                  {currentUser?.nickname ? currentUser.nickname[0].toUpperCase() : '?'}
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-white truncate">
-                    {currentUser?.email || '用户'}
+                    {currentUser?.nickname || currentUser?.email || '用户'}
                   </p>
                   <p className="text-xs text-gray-500">
                     {currentUser?.role === 'admin' ? '管理员' : '普通用户'}

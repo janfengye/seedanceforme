@@ -10,8 +10,9 @@ import { getAuthHeaders } from './authService';
 const API_BASE = '/api';
 
 export interface SessionAccountsResponse {
-  accounts: JimengSessionAccount[];
-  effective: EffectiveSessionResolution;
+  accounts?: JimengSessionAccount[];
+  effective?: EffectiveSessionResolution;
+  summary?: { total: number; available: number };
 }
 
 /**

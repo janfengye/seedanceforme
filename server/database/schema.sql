@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  nickname TEXT DEFAULT NULL,
   role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   credits INTEGER DEFAULT 10, -- 初始赠送 10 积分
@@ -240,3 +241,31 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('min_interval', '30000'),
   ('max_interval', '50000'),
   ('session_id', '');
+
+
+-- ============================================
+-- 邀请码模块表结构
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS invitation_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  note TEXT DEFAULT '',
+  expires_at TEXT DEFAULT NULL,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invitation_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  used_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_invitation_codes_code ON invitation_codes(code);
+CREATE INDEX IF NOT EXISTS idx_invitation_usage_code_id ON invitation_usage(code_id);

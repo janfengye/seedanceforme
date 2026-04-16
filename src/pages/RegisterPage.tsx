@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { register, checkEmailStatus, sendEmailCode, verifyEmailCode } from '../services/authService';
 import type { User } from '../types';
-import { MailIcon, LockIcon, EyeIcon, EyeOffIcon, SparkleIcon, CheckIcon } from '../components/Icons';
+import { MailIcon, LockIcon, EyeIcon, EyeOffIcon, SparkleIcon, CheckIcon, ShieldIcon } from '../components/Icons';
 
 interface RegisterFormData {
+  invitationCode: string;
   email: string;
   password: string;
   confirmPassword: string;
@@ -18,6 +19,7 @@ interface RegisterPageProps {
 export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<RegisterFormData>({
+    invitationCode: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -74,12 +76,10 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
     setError('');
 
     try {
-      // 开发环境下会返回验证码
       await sendEmailCode(formData.email);
       setCodeSent(true);
       setCountdown(60);
 
-      // 倒计时
       const timer = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
@@ -115,20 +115,22 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
     e.preventDefault();
     setError('');
 
-    // 验证密码
+    if (!formData.invitationCode) {
+      setError('请输入邀请码');
+      return;
+    }
+
     const passwordValidation = validatePassword(formData.password);
     if (!passwordValidation.valid) {
       setError(passwordValidation.message);
       return;
     }
 
-    // 验证密码一致性
     if (formData.password !== formData.confirmPassword) {
       setError('两次输入的密码不一致');
       return;
     }
 
-    // 验证邮箱已验证
     if (!emailVerified) {
       setError('请先获取并验证邮箱验证码');
       return;
@@ -141,6 +143,7 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
         email: formData.email,
         password: formData.password,
         emailCode: formData.verificationCode,
+        invitation_code: formData.invitationCode,
       });
       onRegisterSuccess(result.user);
       navigate('/');
@@ -149,6 +152,12 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getCountdownText = () => {
+    if (sendingCode) return '发送中...';
+    if (codeSent && countdown > 0) return `${countdown}秒`;
+    return '获取验证码';
   };
 
   return (
@@ -174,6 +183,27 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
           )}
 
           <form onSubmit={handleVerifyCodeAndSubmit} className="space-y-5">
+            {/* 邀请码输入 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                邀请码
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <ShieldIcon className="w-5 h-5 text-gray-500" />
+                </div>
+                <input
+                  type="text"
+                  value={formData.invitationCode}
+                  onChange={(e) => setFormData({ ...formData, invitationCode: e.target.value.toUpperCase() })}
+                  className="w-full pl-12 pr-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all font-mono tracking-wider"
+                  placeholder="请输入 8 位邀请码"
+                  maxLength={8}
+                  required
+                />
+              </div>
+            </div>
+
             {/* 邮箱输入 */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -231,7 +261,7 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
                   disabled={sendingCode || !formData.email}
                   className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-medium rounded-xl border border-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
-                  {sendingCode ? '发送中...' : codeSent && countdown > 0 ? `${countdown}秒` : '获取验证码'}
+                  {getCountdownText()}
                 </button>
               </div>
               {codeSent && !emailVerified && (

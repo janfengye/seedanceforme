@@ -91,6 +91,17 @@ function shouldSkipMigration(db, file) {
     return columnNames.has('batch_id');
   }
 
+  if (file === '20260416_add_invitation_codes.sql') {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='invitation_codes'`).all();
+    return tables.length > 0;
+  }
+
+  if (file === '20260416_add_nickname.sql') {
+    const columns = db.prepare(`PRAGMA table_info(users)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return columnNames.has('nickname');
+  }
+
   return false;
 }
 

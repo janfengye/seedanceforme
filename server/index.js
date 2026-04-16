@@ -932,23 +932,24 @@ function buildMetaListFromPrompt(prompt, imageCount) {
 // ============================================================
 
 // POST /api/generate-video - 提交任务, 立即返回 taskId
-app.post('/api/generate-video', authenticate, upload.array('files', 9), async (req, res) => {
+app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', maxCount: 9 }, { name: 'audioFiles', maxCount: 3 }]), async (req, res) => {
   const startTime = Date.now();
   let dbTaskId = null;
 
   try {
     const { prompt, ratio, duration, model } = req.body;
-    const files = req.files;
+    const files = req.files?.files || [];
+    const audioFiles = req.files?.audioFiles || [];
 
     const resolvedSessions = jimengSessionService.resolveEffectiveSessions(req.user.id);
     if (!resolvedSessions.sessionId || resolvedSessions.accounts.length === 0) {
       return res.status(401).json({ error: getMissingSessionErrorMessage() });
     }
 
-    if (!Array.isArray(files) || files.length === 0) {
+    if (files.length === 0 && !(prompt && prompt.trim())) {
       return res
         .status(400)
-        .json({ error: 'Seedance 2.0 需要至少上传一张参考图片' });
+        .json({ error: '请至少上传一张参考图片或输入提示词' });
     }
 
     const taskId = createTaskId();
@@ -983,11 +984,16 @@ app.post('/api/generate-video', authenticate, upload.array('files', 9), async (r
     console.log(`\n========== [${taskId}] 收到视频生成请求 ==========`);
     console.log(`  prompt: ${(prompt || '').substring(0, 80)}${(prompt || '').length > 80 ? '...' : ''}`);
     console.log(`  model: ${model || 'seedance-2.0'}, ratio: ${ratio || '4:3'}, duration: ${duration || 4}秒`);
-    console.log(`  files: ${files.length}张`);
+    console.log(`  files: ${files.length}张, audioFiles: ${audioFiles.length}个`);
     console.log(`  session source: ${resolvedSessions.source}`);
     files.forEach((f, i) => {
       console.log(
         `  file[${i}]: ${f.originalname} (${f.mimetype}, ${(f.size / 1024).toFixed(1)}KB)`
+      );
+    });
+    audioFiles.forEach((f, i) => {
+      console.log(
+        `  audio[${i}]: ${f.originalname} (${f.mimetype}, ${(f.size / 1024).toFixed(1)}KB)`
       );
     });
 
@@ -1013,6 +1019,7 @@ app.post('/api/generate-video', authenticate, upload.array('files', 9), async (r
       ratio: ratio || '4:3',
       duration: parseInt(duration) || 4,
       files,
+      audioFiles,
       sessionId: account.sessionId,
       model: model || 'seedance-2.0',
       onProgress: async (progress) => {
@@ -1184,6 +1191,9 @@ app.get('/api/video-proxy', async (req, res) => {
     const contentLength = response.headers.get('content-length');
     if (contentLength) res.setHeader('Content-Length', contentLength);
     res.setHeader('Accept-Ranges', 'bytes');
+    if (req.query.download === '1') {
+      res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
+    }
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
     // 流式转发视频数据
@@ -1599,10 +1609,11 @@ app.post('/api/tasks/:id/generate', authenticate, async (req, res) => {
 
     const assets = taskService.getTaskAssets(req.params.id);
     const imageAssets = assets.filter(a => a.asset_type === 'image');
+    const audioAssets = assets.filter(a => a.asset_type === 'audio');
     const settings = settingsService.getAllSettings();
 
-    if (imageAssets.length === 0) {
-      return res.status(400).json({ error: '任务没有图片素材，请至少上传一张参考图片' });
+    if (imageAssets.length === 0 && !task.prompt?.trim()) {
+      return res.status(400).json({ error: '任务没有图片素材且无提示词，请至少提供其中一个' });
     }
 
     const files = [];
@@ -1619,8 +1630,22 @@ app.post('/api/tasks/:id/generate', authenticate, async (req, res) => {
       }
     }
 
-    if (files.length === 0) {
-      return res.status(400).json({ error: '没有可用的图片文件' });
+    const audioFiles = [];
+    for (const asset of audioAssets) {
+      try {
+        const buffer = readFileSync(asset.file_path);
+        audioFiles.push({
+          buffer,
+          originalname: asset.file_path.split('/').pop(),
+          size: buffer.length,
+        });
+      } catch (err) {
+        console.error(`读取音频文件失败：${asset.file_path}`, err.message);
+      }
+    }
+
+    if (files.length === 0 && !task.prompt?.trim()) {
+      return res.status(400).json({ error: '没有可用的图片文件且无提示词' });
     }
 
     taskService.updateTaskStatus(task.id, 'generating', {
@@ -1660,6 +1685,7 @@ app.post('/api/tasks/:id/generate', authenticate, async (req, res) => {
       ratio: settings.ratio || '16:9',
       duration: parseInt(settings.duration) || 5,
       files,
+      audioFiles,
       sessionId: account.sessionId,
       model: settings.model || 'seedance-2.0-fast',
       onProgress: async (progress) => {
@@ -2133,16 +2159,26 @@ app.put('/api/settings', (req, res) => {
 // GET /api/settings/session-accounts - 获取当前用户的 SessionID 账号列表
 app.get('/api/settings/session-accounts', authenticate, (req, res) => {
   try {
-    const accounts = jimengSessionService.listUserAccounts(req.user.id);
-    const effective = jimengSessionService.resolveEffectiveSessions(req.user.id);
-    res.json({ success: true, data: { accounts, effective } });
+    if (req.user.role === 'admin') {
+      const accounts = jimengSessionService.listUserAccounts(req.user.id);
+      const effective = jimengSessionService.resolveEffectiveSessions(req.user.id);
+      res.json({ success: true, data: { accounts, effective } });
+    } else {
+      const db = getDatabase();
+      const summary = db.prepare(`
+        SELECT COUNT(*) as total, 
+          SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) as available
+        FROM jimeng_session_accounts
+      `).get();
+      res.json({ success: true, data: { summary: { total: summary.total || 0, available: summary.available || 0 } } });
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // POST /api/settings/session-accounts - 新增 SessionID 账号
-app.post('/api/settings/session-accounts', authenticate, (req, res) => {
+app.post('/api/settings/session-accounts', authenticate, requireAdmin, (req, res) => {
   try {
     const account = jimengSessionService.createUserAccount(req.user.id, req.body || {});
     res.json({ success: true, data: account });
@@ -2152,7 +2188,7 @@ app.post('/api/settings/session-accounts', authenticate, (req, res) => {
 });
 
 // PUT /api/settings/session-accounts/:id - 更新 SessionID 账号
-app.put('/api/settings/session-accounts/:id', authenticate, (req, res) => {
+app.put('/api/settings/session-accounts/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const account = jimengSessionService.updateUserAccount(
       req.user.id,
@@ -2166,7 +2202,7 @@ app.put('/api/settings/session-accounts/:id', authenticate, (req, res) => {
 });
 
 // DELETE /api/settings/session-accounts/:id - 删除 SessionID 账号
-app.delete('/api/settings/session-accounts/:id', authenticate, (req, res) => {
+app.delete('/api/settings/session-accounts/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const result = jimengSessionService.deleteUserAccount(req.user.id, Number(req.params.id));
     res.json({ success: true, data: result });
@@ -2176,7 +2212,7 @@ app.delete('/api/settings/session-accounts/:id', authenticate, (req, res) => {
 });
 
 // POST /api/settings/session-accounts/:id/default - 设为默认账号
-app.post('/api/settings/session-accounts/:id/default', authenticate, (req, res) => {
+app.post('/api/settings/session-accounts/:id/default', authenticate, requireAdmin, (req, res) => {
   try {
     const account = jimengSessionService.setDefaultAccount(req.user.id, Number(req.params.id));
     res.json({ success: true, data: account });
@@ -2186,7 +2222,7 @@ app.post('/api/settings/session-accounts/:id/default', authenticate, (req, res) 
 });
 
 // POST /api/settings/session-accounts/test - 测试 SessionID
-app.post('/api/settings/session-accounts/test', authenticate, async (req, res) => {
+app.post('/api/settings/session-accounts/test', authenticate, requireAdmin, async (req, res) => {
   try {
     const { sessionId } = req.body;
     if (!sessionId) {
@@ -2772,13 +2808,51 @@ app.delete('/api/download/tasks/:id', (req, res) => {
 // POST /api/auth/register - 用户注册
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, emailCode } = req.body;
+    const { email, password, emailCode, invitation_code } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: '邮箱和密码不能为空' });
     }
 
-    const result = await authService.registerUser(email, password, emailCode);
+    if (!invitation_code) {
+      return res.status(400).json({ error: '需要邀请码' });
+    }
+
+    const db = getDatabase();
+
+    // Atomic: claim a slot first (fixes TOCTOU race condition)
+    const updateResult = db.prepare(`
+      UPDATE invitation_codes
+      SET used_count = used_count + 1, updated_at = datetime('now')
+      WHERE code = ?
+        AND is_active = 1
+        AND (expires_at IS NULL OR expires_at > datetime('now'))
+        AND (max_uses = 0 OR used_count < max_uses)
+    `).run(invitation_code);
+
+    if (updateResult.changes === 0) {
+      const codeRecord = db.prepare('SELECT * FROM invitation_codes WHERE code = ?').get(invitation_code);
+      if (!codeRecord) return res.status(400).json({ error: '邀请码无效' });
+      if (!codeRecord.is_active) return res.status(400).json({ error: '邀请码已停用，请联系管理员获取新的邀请码' });
+      if (codeRecord.expires_at && codeRecord.expires_at <= new Date().toISOString())
+        return res.status(400).json({ error: '邀请码已过期，请联系管理员获取新的邀请码' });
+      return res.status(400).json({ error: '邀请码已达到使用上限' });
+    }
+
+    const codeRecord = db.prepare('SELECT id FROM invitation_codes WHERE code = ?').get(invitation_code);
+
+    // Register user (rollback slot on failure)
+    let result;
+    try {
+      result = await authService.registerUser(email, password, emailCode);
+    } catch (err) {
+      db.prepare('UPDATE invitation_codes SET used_count = used_count - 1 WHERE id = ?').run(codeRecord.id);
+      throw err;
+    }
+
+    // Record usage
+    db.prepare('INSERT INTO invitation_usage (code_id, user_id) VALUES (?, ?)').run(codeRecord.id, result.user.id);
+
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -2817,7 +2891,11 @@ app.post('/api/auth/logout', async (req, res) => {
 // GET /api/auth/me - 获取当前用户信息
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
-    res.json({ success: true, data: { user: req.user } });
+    // Enrich user with nickname from DB
+    const db = getDatabase();
+    const userRow = db.prepare('SELECT nickname FROM users WHERE id = ?').get(req.user.id);
+    const user = { ...req.user, nickname: userRow?.nickname || '' };
+    res.json({ success: true, data: { user } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3123,6 +3201,178 @@ app.post('/api/admin/config', authenticate, requireAdmin, async (req, res) => {
     if (resetMailTransporterCache) resetMailTransporterCache();
 
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// 邀请码管理 API (管理员)
+// ============================================================
+
+// GET /api/admin/invitation-codes - 获取邀请码列表
+app.get('/api/admin/invitation-codes', authenticate, requireAdmin, (req, res) => {
+  try {
+    const db = getDatabase();
+    const codes = db.prepare(`
+      SELECT ic.*, u.email as creator_email,
+        (SELECT COUNT(*) FROM invitation_usage iu WHERE iu.code_id = ic.id) as actual_used_count
+      FROM invitation_codes ic
+      LEFT JOIN users u ON ic.created_by = u.id
+      ORDER BY ic.created_at DESC
+    `).all();
+    res.json({ success: true, data: codes });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/admin/invitation-codes - 生成邀请码
+app.post('/api/admin/invitation-codes', authenticate, requireAdmin, (req, res) => {
+  try {
+    const db = getDatabase();
+    const { count = 1, max_uses = 1, note = '', expires_at = null } = req.body;
+    const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const results = [];
+    
+    const MAX_RETRIES = 3;
+    
+    for (let i = 0; i < Math.min(count, 50); i++) {
+      let inserted = false;
+      for (let retry = 0; retry < MAX_RETRIES; retry++) {
+        const bytes = crypto.randomBytes(8);
+        let code = '';
+        for (let j = 0; j < 8; j++) {
+          code += CHARSET[bytes[j] % CHARSET.length];
+        }
+        
+        try {
+          const result = db.prepare(`
+            INSERT INTO invitation_codes (code, created_by, max_uses, note, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(code, req.user.id, max_uses, note, expires_at);
+          
+          results.push({
+            id: result.lastInsertRowid,
+            code,
+            max_uses,
+            used_count: 0,
+            is_active: 1,
+            note,
+            expires_at,
+            created_by: req.user.id,
+            created_at: new Date().toISOString()
+          });
+          inserted = true;
+          break;
+        } catch (e) {
+          // code collision, retry
+        }
+      }
+      if (!inserted) {
+        return res.status(500).json({ error: '生成邀请码失败，请重试' });
+      }
+    }
+    
+    res.json({ success: true, data: results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/admin/invitation-codes/:id - 更新邀请码 (停用/启用)
+app.put('/api/admin/invitation-codes/:id', authenticate, requireAdmin, (req, res) => {
+  try {
+    const db = getDatabase();
+    const { is_active, note, max_uses } = req.body;
+    const updates = [];
+    const params = [];
+    
+    if (is_active !== undefined) { updates.push('is_active = ?'); params.push(is_active ? 1 : 0); }
+    if (note !== undefined) { updates.push('note = ?'); params.push(note); }
+    if (max_uses !== undefined) { updates.push('max_uses = ?'); params.push(max_uses); }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ error: '没有要更新的字段' });
+    }
+    
+    params.push(Number(req.params.id));
+    db.prepare(`UPDATE invitation_codes SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    
+    const updated = db.prepare('SELECT * FROM invitation_codes WHERE id = ?').get(Number(req.params.id));
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/admin/invitation-codes/:id - 删除邀请码
+app.delete('/api/admin/invitation-codes/:id', authenticate, requireAdmin, (req, res) => {
+  try {
+    const db = getDatabase();
+    db.prepare('DELETE FROM invitation_codes WHERE id = ?').run(Number(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/admin/invitation-codes/:id/usage - 获取邀请码使用记录
+app.get('/api/admin/invitation-codes/:id/usage', authenticate, requireAdmin, (req, res) => {
+  try {
+    const db = getDatabase();
+    const usage = db.prepare(`
+      SELECT iu.*, u.email as user_email
+      FROM invitation_usage iu
+      LEFT JOIN users u ON iu.user_id = u.id
+      WHERE iu.code_id = ?
+      ORDER BY iu.used_at DESC
+    `).all(Number(req.params.id));
+    res.json({ success: true, data: usage });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// 用户资料 API
+// ============================================================
+
+// GET /api/user/profile - 获取用户资料
+app.get('/api/user/profile', authenticate, (req, res) => {
+  try {
+    const db = getDatabase();
+    const user = db.prepare('SELECT id, email, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, data: user });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/user/profile - 更新用户资料
+app.put('/api/user/profile', authenticate, (req, res) => {
+  try {
+    const { nickname } = req.body;
+    
+    if (nickname === undefined || nickname === null) {
+      return res.status(400).json({ error: '请提供昵称' });
+    }
+    
+    if (typeof nickname !== 'string' || !/^[A-Za-z0-9]{2,10}$/.test(nickname)) {
+      return res.status(400).json({ error: '昵称需为 2-10 位英文字母或数字' });
+    }
+    
+    const db = getDatabase();
+    
+    // Check uniqueness
+    const existing = db.prepare('SELECT id FROM users WHERE nickname = ? AND id != ?').get(nickname, req.user.id);
+    if (existing) {
+      return res.status(409).json({ error: 'nickname_taken', message: '该昵称已被使用，请换一个' });
+    }
+    
+    db.prepare('UPDATE users SET nickname = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nickname, req.user.id);
+    const user = db.prepare('SELECT id, email, nickname, role, status, credits, created_at FROM users WHERE id = ?').get(req.user.id);
+    res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
