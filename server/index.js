@@ -108,7 +108,7 @@ const authenticate = async (req, res, next) => {
 
 // 管理员认证中间件
 const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'super_admin') {
     return res.status(403).json({ error: '需要管理员权限' });
   }
   next();
@@ -1240,7 +1240,7 @@ app.use((err, _req, res, _next) => {
 // GET /api/projects - 获取项目列表
 app.get('/api/projects', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const projects = projectService.getAllProjects(req.user.id, isAdmin);
     res.json({ success: true, data: projects });
   } catch (error) {
@@ -1265,7 +1265,7 @@ app.post('/api/projects', authenticate, (req, res) => {
 // GET /api/projects/:id - 获取项目详情
 app.get('/api/projects/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
     if (!project) {
       return res.status(404).json({ error: '项目不存在或无权访问' });
@@ -1279,7 +1279,7 @@ app.get('/api/projects/:id', authenticate, (req, res) => {
 // PUT /api/projects/:id - 更新项目
 app.put('/api/projects/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
     if (!project) {
       return res.status(404).json({ error: '项目不存在或无权访问' });
@@ -1307,7 +1307,7 @@ app.put('/api/projects/:id', authenticate, (req, res) => {
 // DELETE /api/projects/:id - 删除项目
 app.delete('/api/projects/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
     if (!project) {
       return res.status(404).json({ error: '项目不存在或无权访问' });
@@ -1326,7 +1326,7 @@ app.delete('/api/projects/:id', authenticate, (req, res) => {
 // GET /api/projects/:id/tasks - 获取项目下的任务列表
 app.get('/api/projects/:id/tasks', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
     if (!project) {
       return res.status(404).json({ success: false, error: '项目不存在或无权访问' });
@@ -1349,7 +1349,7 @@ app.get('/api/projects/:id/tasks', authenticate, (req, res) => {
 // GET /api/tasks/:id - 获取任务详情
 app.get('/api/tasks/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1363,7 +1363,7 @@ app.get('/api/tasks/:id', authenticate, (req, res) => {
 // POST /api/projects/:projectId/tasks - 创建任务
 app.post('/api/projects/:projectId/tasks', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.projectId, req.user.id, isAdmin);
     if (!project) {
       return res.status(404).json({ success: false, error: '项目不存在或无权访问' });
@@ -1407,7 +1407,7 @@ app.post('/api/projects/:projectId/tasks', authenticate, (req, res) => {
 // PUT /api/tasks/:id - 更新任务
 app.put('/api/tasks/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1427,7 +1427,7 @@ app.put('/api/tasks/:id', authenticate, (req, res) => {
 // DELETE /api/tasks/:id - 删除任务
 app.delete('/api/tasks/:id', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1449,7 +1449,7 @@ app.post('/api/tasks/:id/assets', authenticate, upload.fields([
   { name: 'audios', maxCount: 2 },
 ]), async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1538,7 +1538,7 @@ app.delete('/api/tasks/assets/:assetId', (req, res) => {
 // POST /api/tasks/:id/generate - 单个任务生成
 app.post('/api/tasks/:id/generate', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在' });
@@ -1766,7 +1766,7 @@ app.post('/api/tasks/:id/generate', authenticate, async (req, res) => {
 // POST /api/tasks/:id/cancel - 取消任务（包括正在生成的任务）
 app.post('/api/tasks/:id/cancel', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1812,7 +1812,7 @@ app.post('/api/tasks/:id/cancel', authenticate, async (req, res) => {
 // POST /api/tasks/:id/collect - 二次采集视频（根据 history_id）
 app.post('/api/tasks/:id/collect', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1861,7 +1861,7 @@ app.post('/api/tasks/:id/collect', authenticate, async (req, res) => {
 // POST /api/batch/:batchId/collect - 批量二次采集视频
 app.post('/api/batch/:batchId/collect', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const batch = batchService.getBatchById(req.params.batchId, req.user.id, isAdmin);
     if (!batch) {
       return res.status(404).json({ error: '批量任务不存在或无权访问' });
@@ -1945,7 +1945,7 @@ app.post('/api/batch/:batchId/collect', authenticate, async (req, res) => {
 // POST /api/tasks/:id/download - 下载任务视频
 app.post('/api/tasks/:id/download', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -1971,7 +1971,7 @@ app.post('/api/tasks/:id/download', authenticate, async (req, res) => {
 // POST /api/tasks/:id/open-folder - 打开视频所在文件夹
 app.post('/api/tasks/:id/open-folder', authenticate, async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const task = taskService.getTaskById(req.params.id, req.user.id, isAdmin);
     if (!task) {
       return res.status(404).json({ error: '任务不存在或无权访问' });
@@ -2000,7 +2000,7 @@ app.post('/api/tasks/:id/open-folder', authenticate, async (req, res) => {
 app.post('/api/batch/generate', authenticate, async (req, res) => {
   try {
     const { projectId, taskIds, name = '', concurrent = 5 } = req.body;
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
 
     if (!projectId || !Array.isArray(taskIds) || taskIds.length === 0) {
       return res.status(400).json({ success: false, error: '参数不完整' });
@@ -2065,7 +2065,7 @@ app.post('/api/batch/generate', authenticate, async (req, res) => {
 // GET /api/batch/:batchId/status - 获取批量任务状态
 app.get('/api/batch/:batchId/status', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const status = batchService.getBatchStatus(req.params.batchId, req.user.id, isAdmin);
     if (!status) {
       return res.status(404).json({ success: false, error: '批量任务不存在或无权访问' });
@@ -2079,7 +2079,7 @@ app.get('/api/batch/:batchId/status', authenticate, (req, res) => {
 // POST /api/batch/:batchId/pause - 暂停批量任务
 app.post('/api/batch/:batchId/pause', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const batch = batchService.getBatchById(req.params.batchId, req.user.id, isAdmin);
     if (!batch) {
       return res.status(404).json({ success: false, error: '批量任务不存在或无权访问' });
@@ -2098,7 +2098,7 @@ app.post('/api/batch/:batchId/pause', authenticate, (req, res) => {
 // POST /api/batch/:batchId/resume - 恢复批量任务
 app.post('/api/batch/:batchId/resume', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const batch = batchService.getBatchById(req.params.batchId, req.user.id, isAdmin);
     if (!batch) {
       return res.status(404).json({ success: false, error: '批量任务不存在或无权访问' });
@@ -2117,7 +2117,7 @@ app.post('/api/batch/:batchId/resume', authenticate, (req, res) => {
 // POST /api/batch/:batchId/cancel - 取消批量任务
 app.post('/api/batch/:batchId/cancel', authenticate, (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const batch = batchService.getBatchById(req.params.batchId, req.user.id, isAdmin);
     if (!batch) {
       return res.status(404).json({ success: false, error: '批量任务不存在或无权访问' });
@@ -2349,7 +2349,7 @@ app.get('/api/download/tasks/:id/file', authenticate, async (req, res) => {
 app.get('/api/download/tasks', authenticate, (req, res) => {
   try {
     const { status = 'all', type = 'all', page = 1, pageSize = 20 } = req.query;
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const result = videoDownloader.getDownloadTasks({
       status,
       type,
@@ -2370,7 +2370,7 @@ app.post('/api/download/refresh', authenticate, async (req, res) => {
     const db = getDatabase();
     const resolvedSession = jimengSessionService.resolveEffectiveSession(req.user.id);
     const sessionId = resolvedSession.sessionId;
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
 
     if (!sessionId) {
       return res.status(400).json({ error: getMissingSessionErrorMessage() });
@@ -3210,6 +3210,37 @@ app.post('/api/admin/config', authenticate, requireAdmin, async (req, res) => {
 // 邀请码管理 API (管理员)
 // ============================================================
 
+// PUT /api/admin/users/:id/role - 设置用户角色（仅超级管理员）
+app.put('/api/admin/users/:id/role', authenticate, requireAdmin, async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: '仅超级管理员可以设置用户角色' });
+    }
+
+    const userId = Number(req.params.id);
+    const { role } = req.body;
+
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({ error: '无效的角色' });
+    }
+
+    if (userId === req.user.id) {
+      return res.status(400).json({ error: '不能修改自己的角色' });
+    }
+
+    const db = getDatabase();
+    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    db.prepare(`UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?`).run(role, userId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // DELETE /api/admin/users/:id - 删除用户
 app.delete('/api/admin/users/:id', authenticate, requireAdmin, async (req, res) => {
   try {
@@ -3225,6 +3256,10 @@ app.delete('/api/admin/users/:id', authenticate, requireAdmin, async (req, res) 
     const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(userId);
     if (!user) {
       return res.status(404).json({ error: '用户不存在' });
+    }
+
+    if (user.role === 'super_admin') {
+      return res.status(400).json({ error: '不能删除超级管理员' });
     }
 
     // 删除用户相关数据（级联删除会处理 sessions, check_ins 等）
@@ -3368,6 +3403,10 @@ app.delete('/api/admin/users/:id', authenticate, requireAdmin, async (req, res) 
     const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(userId);
     if (!user) {
       return res.status(404).json({ error: '用户不存在' });
+    }
+
+    if (user.role === 'super_admin') {
+      return res.status(400).json({ error: '不能删除超级管理员' });
     }
 
     // 删除用户相关数据（级联删除会处理 sessions, check_ins 等）

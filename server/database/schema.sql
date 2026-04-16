@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   nickname TEXT DEFAULT NULL,
-  role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+  role TEXT DEFAULT 'user',
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   credits INTEGER DEFAULT 10, -- 初始赠送 10 积分
   daily_check_in INTEGER DEFAULT 0, -- 是否已签到
@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_email_verification_codes_expires_at ON email_veri
 
 -- 插入默认管理员账户 (密码：admin123456)
 INSERT OR IGNORE INTO users (email, password_hash, username, role, status, credits)
-VALUES ('admin@seedance.com', '9e5f160f7992eda2696de915f2f8f90bb3c372555bf686a1f0363ea5df9511ff', 'admin', 'admin', 'active', 1000);
+VALUES ('admin@seedance.com', '9e5f160f7992eda2696de915f2f8f90bb3c372555bf686a1f0363ea5df9511ff', 'admin', 'super_admin', 'active', 1000);
 
 -- ============================================
 -- 原有业务表结构

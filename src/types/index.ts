@@ -16,7 +16,7 @@ export interface User {
   email: string;
   username?: string;
   nickname?: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'super_admin';
   status: 'active' | 'disabled';
   credits: number;
   createdAt?: string;

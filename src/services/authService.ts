@@ -545,6 +545,27 @@ export async function updateUserCredits(
 /**
  * 重置用户密码
  */
+
+/**
+ * 设置用户角色
+ */
+export async function setUserRole(userId: number, role: 'user' | 'admin'): Promise<void> {
+  const sessionId = getSessionId();
+  if (!sessionId) throw new Error('未登录');
+
+  const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Session-ID': sessionId,
+    },
+    body: JSON.stringify({ role }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '设置角色失败');
+}
+
 export async function deleteUser(userId: number): Promise<void> {
   const sessionId = getSessionId();
 

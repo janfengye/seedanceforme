@@ -108,6 +108,11 @@ function shouldSkipMigration(db, file) {
     return columnNames.has('username');
   }
 
+  if (file === '20260416_add_super_admin.sql') {
+    const row = db.prepare("SELECT role FROM users WHERE email = 'admin@seedance.com'").get();
+    return row && row.role === 'super_admin';
+  }
+
   return false;
 }
 

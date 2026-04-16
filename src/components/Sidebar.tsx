@@ -90,7 +90,7 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
   };
 
   const visibleItems = menuItems.filter(
-    (item) => !item.adminOnly || currentUser?.role === 'admin'
+    (item) => !item.adminOnly || currentUser?.role === 'admin' || currentUser?.role === 'super_admin'
   );
 
   return (
@@ -172,7 +172,7 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
                     {currentUser?.nickname || currentUser?.username || '用户'}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {currentUser?.role === 'admin' ? '管理员' : '普通用户'}
+                    {currentUser?.role === 'super_admin' ? '超级管理员' : currentUser?.role === 'admin' ? '管理员' : '普通用户'}
                   </p>
                 </div>
               </div>

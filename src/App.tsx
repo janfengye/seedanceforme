@@ -27,7 +27,7 @@ function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
-  if (requireAdmin && currentUser.role !== 'admin') {
+  if (requireAdmin && currentUser.role !== 'admin' && currentUser.role !== 'super_admin') {
     return <Navigate to="/" replace />;
   }
 

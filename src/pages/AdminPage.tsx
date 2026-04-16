@@ -6,6 +6,7 @@ import {
   updateUserCredits,
   resetUserPassword,
   deleteUser,
+  setUserRole,
 } from '../services/authService';
 import {
   getInvitationCodes,
@@ -14,6 +15,7 @@ import {
   deleteInvitationCode,
 } from '../services/adminService';
 import type { User, InvitationCode } from '../types';
+import { useApp } from '../context/AppContext';
 import { UsersIcon, ShieldIcon, CheckIcon, SparkleIcon, CloseIcon, PlusIcon } from '../components/Icons';
 
 interface SystemStats {
@@ -26,6 +28,8 @@ interface SystemStats {
 }
 
 export default function AdminPage() {
+  const { currentUser } = useApp();
+  const isSuperAdmin = currentUser?.role === 'super_admin';
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +142,20 @@ export default function AdminPage() {
       alert('积分已更新');
     } catch (err) {
       alert(err instanceof Error ? err.message : '更新积分失败');
+    }
+  };
+
+  const handleToggleRole = async (userId: number, currentRole: string) => {
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    const actionText = newRole === 'admin' ? '设为管理员' : '取消管理员';
+    if (!confirm(`确定要${actionText}吗？`)) return;
+
+    try {
+      await setUserRole(userId, newRole);
+      loadUsers(currentPage);
+      loadStats();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '设置角色失败');
     }
   };
 
@@ -284,6 +302,7 @@ export default function AdminPage() {
                     <option value="all">所有角色</option>
                     <option value="user">普通用户</option>
                     <option value="admin">管理员</option>
+                    <option value="super_admin">超级管理员</option>
                   </select>
                   <select
                     value={filterStatus}
@@ -331,11 +350,13 @@ export default function AdminPage() {
                           <td className="px-6 py-4 text-sm text-white">{(user as any).username || user.email}</td>
                           <td className="px-6 py-4 text-sm">
                             <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                              user.role === 'admin'
+                              user.role === 'super_admin'
+                                ? 'bg-red-500/20 text-red-400'
+                                : user.role === 'admin'
                                 ? 'bg-amber-500/20 text-amber-400'
                                 : 'bg-gray-500/20 text-gray-400'
                             }`}>
-                              {user.role === 'admin' ? '管理员' : '普通用户'}
+                              {user.role === 'super_admin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '普通用户'}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-sm">
@@ -372,6 +393,18 @@ export default function AdminPage() {
                               >
                                 编辑
                               </button>
+                              {isSuperAdmin && user.role !== 'super_admin' && (
+                                <button
+                                  onClick={() => handleToggleRole(user.id, user.role)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                    user.role === 'admin'
+                                      ? 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
+                                      : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                                  }`}
+                                >
+                                  {user.role === 'admin' ? '取消管理员' : '设为管理员'}
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
