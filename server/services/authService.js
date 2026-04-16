@@ -161,8 +161,8 @@ export async function registerUser(username, password) {
   const db = getDatabase();
 
   // 验证用户名格式
-  if (!username || !/^[A-Za-z0-9]{2,10}$/.test(username)) {
-    throw new Error('用户名需为 2-10 位英文字母或数字');
+  if (!username || !/^[\u4e00-\u9fa5A-Za-z0-9]{2,10}$/.test(username)) {
+    throw new Error('用户��需为 2-10 位中英文或数字');
   }
 
   // 验证密码强度

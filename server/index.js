@@ -2823,7 +2823,7 @@ app.post('/api/auth/register', async (req, res) => {
     // Atomic: claim a slot first (fixes TOCTOU race condition)
     const updateResult = db.prepare(`
       UPDATE invitation_codes
-      SET used_count = used_count + 1, updated_at = datetime('now')
+      SET used_count = used_count + 1
       WHERE code = ?
         AND is_active = 1
         AND (expires_at IS NULL OR expires_at > datetime('now'))
@@ -3358,8 +3358,8 @@ app.put('/api/user/profile', authenticate, (req, res) => {
       return res.status(400).json({ error: '请提供昵称' });
     }
     
-    if (typeof nickname !== 'string' || !/^[A-Za-z0-9]{2,10}$/.test(nickname)) {
-      return res.status(400).json({ error: '昵称需为 2-10 位英文字母或数字' });
+    if (typeof nickname !== 'string' || !/^[\u4e00-\u9fa5A-Za-z0-9]{2,10}$/.test(nickname)) {
+      return res.status(400).json({ error: '昵称需为 2-10 位中英文或数字' });
     }
     
     const db = getDatabase();

@@ -30,8 +30,8 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
 
   const validateUsername = (username: string): { valid: boolean; message: string } => {
     if (!username) return { valid: false, message: '请输入用户名' };
-    if (!/^[A-Za-z0-9]{2,10}$/.test(username)) {
-      return { valid: false, message: '用户名需为 2-10 位英文字母或数字' };
+    if (!/^[\u4e00-\u9fa5A-Za-z0-9]{2,10}$/.test(username)) {
+      return { valid: false, message: '用户名需为 2-10 位中英文或数��' };
     }
     return { valid: true, message: '' };
   };
@@ -167,7 +167,7 @@ export default function RegisterPage({ onRegisterSuccess }: RegisterPageProps) {
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   className="w-full pl-12 pr-4 py-3 bg-[#0f111a] border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                  placeholder="2-10 位英文字母或数字"
+                  placeholder="2-10 位中英文或数字"
                   maxLength={10}
                   required
                 />
