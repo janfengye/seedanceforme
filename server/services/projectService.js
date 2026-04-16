@@ -21,18 +21,11 @@ export function getAllProjects(userId = null, isAdmin = false) {
     FROM projects p
   `;
 
-  const params = [];
-
-  // 非管理员用户只能查看自己的项目
-  if (!isAdmin && userId !== null) {
-    query += ` WHERE p.user_id = ?`;
-    params.push(userId);
-  }
-
+  // 项目是团队共享资源，所有登录用户都可查看
   query += ` ORDER BY p.updated_at DESC`;
 
   const stmt = db.prepare(query);
-  return stmt.all(...params);
+  return stmt.all();
 }
 
 /**
@@ -55,12 +48,7 @@ export function getProjectById(id, userId = null, isAdmin = false) {
 
   const params = [id];
 
-  // 非管理员用户只能查看自己的项目
-  if (!isAdmin && userId !== null) {
-    query += ` AND p.user_id = ?`;
-    params.push(userId);
-  }
-
+  // 项目是团队共享资源，所有登录用户都可查看
   const stmt = db.prepare(query);
   return stmt.get(...params);
 }
@@ -68,7 +56,7 @@ export function getProjectById(id, userId = null, isAdmin = false) {
 /**
  * 创建项目
  */
-export function createProject({ name, description, settings = {}, user_id }) {
+export function createProject({ name, description, settings = {}, code, user_id }) {
   const db = getDatabase();
 
   if (!user_id) {
@@ -76,17 +64,17 @@ export function createProject({ name, description, settings = {}, user_id }) {
   }
 
   const stmt = db.prepare(`
-    INSERT INTO projects (name, description, settings_json, user_id)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO projects (name, description, settings_json, code, user_id)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  const result = stmt.run(name, description, JSON.stringify(settings), user_id);
+  const result = stmt.run(name, description, JSON.stringify(settings), code || null, user_id);
   return getProjectById(result.lastInsertRowid);
 }
 
 /**
  * 更新项目
  */
-export function updateProject(id, { name, description, settings }) {
+export function updateProject(id, { name, description, settings, code }) {
   const db = getDatabase();
 
   const updates = [];
@@ -103,6 +91,10 @@ export function updateProject(id, { name, description, settings }) {
   if (settings !== undefined) {
     updates.push('settings_json = ?');
     values.push(JSON.stringify(settings));
+  }
+  if (code !== undefined) {
+    updates.push('code = ?');
+    values.push(code || null);
   }
 
   if (updates.length === 0) {
@@ -142,12 +134,10 @@ export function getTasksByProjectId(projectId, options = {}, userId = null, isAd
   const db = getDatabase();
   const { status, limit = 100, offset = 0 } = options;
 
-  // 首先检查项目权限（非管理员只能访问自己的项目）
-  if (!isAdmin && userId !== null) {
-    const project = db.prepare('SELECT user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== userId) {
-      throw new Error('无权访问此项目');
-    }
+  // 项目是团队共享资源，只需确认项目存在
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+  if (!project) {
+    throw new Error('项目不存在');
   }
 
   let query = `

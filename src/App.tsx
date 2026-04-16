@@ -10,6 +10,7 @@ import BatchManagementPage from './pages/BatchManagement';
 import SettingsPage from './pages/Settings';
 import ProfilePage from './pages/ProfilePage';
 import DownloadManagementPage from './pages/DownloadManagement';
+import ProjectDetailPage from './pages/ProjectDetailPage';
 import type { User } from './types';
 import { getCurrentUser } from './services/authService';
 
@@ -182,6 +183,17 @@ function AppContent() {
             <ProtectedRoute requireAdmin currentUser={currentUser}>
               <MainLayout currentUser={currentUser} onLogout={handleLogout}>
                 <AdminPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/projects/:id"
+          element={
+            <ProtectedRoute currentUser={currentUser}>
+              <MainLayout currentUser={currentUser} onLogout={handleLogout}>
+                <ProjectDetailPage currentUser={currentUser} />
               </MainLayout>
             </ProtectedRoute>
           }

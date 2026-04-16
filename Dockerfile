@@ -60,6 +60,8 @@ RUN cd server && npx playwright-core install chromium
 COPY server/index.js server/browser-service.js ./server/
 COPY server/database/ ./server/database/
 COPY server/services/ ./server/services/
+COPY server/middleware/ ./server/middleware/
+COPY server/routes/ ./server/routes/
 
 # 从第一阶段复制前端构建产物
 COPY --from=frontend-build /app/dist ./dist

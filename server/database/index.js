@@ -113,7 +113,18 @@ function shouldSkipMigration(db, file) {
     return row && row.role === 'super_admin';
   }
 
+  if (file === '20260417_add_shot_management.sql') {
+    const hasEpisodes = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='episodes'").get();
+    if (hasEpisodes) return true;
+  }
+
   return false;
+
+  if (file === '20260416_account_credits.sql') {
+    const columns = db.prepare(`PRAGMA table_info(jimeng_session_accounts)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return columnNames.has('expires_at');
+  }
 }
 
 function applyMigrations(db) {

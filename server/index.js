@@ -15,6 +15,7 @@ import * as videoDownloader from './services/videoDownloader.js';
 import { generateSeedanceVideo as generateSeedanceVideoCore } from './services/videoGenerator.js';
 import * as authService from './services/authService.js';
 import * as jimengSessionService from './services/jimengSessionService.js';
+import * as jimengCreditService from './services/jimengCreditService.js';
 import { readFileSync } from 'fs';
 
 // 初始化数据库
@@ -27,6 +28,10 @@ const DEFAULT_SESSION_ID = process.env.VITE_DEFAULT_SESSION_ID || '';
 
 app.use(cors());
 app.use(express.json());
+
+// M3+M4 路由
+app.use('/api', episodesRouter);
+app.use('/api', shotsRouter);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -85,34 +90,11 @@ function consumeDownloadToken(token, userId = null) {
 
 setInterval(cleanupExpiredDownloadTokens, DOWNLOAD_TOKEN_TTL_MS).unref();
 
-// 认证中间件
-const authenticate = async (req, res, next) => {
-  const sessionId = req.headers['x-session-id'];
-
-  if (!sessionId) {
-    return res.status(401).json({ error: '未登录' });
-  }
-
-  try {
-    const user = await authService.getCurrentUser(sessionId);
-    if (!user) {
-      return res.status(401).json({ error: 'Session 已过期或无效' });
-    }
-    req.user = user;
-    req.sessionId = sessionId; // 保存原始 sessionId 供后续使用
-    next();
-  } catch (error) {
-    res.status(401).json({ error: '认证失败' });
-  }
-};
-
-// 管理员认证中间件
-const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'super_admin') {
-    return res.status(403).json({ error: '需要管理员权限' });
-  }
-  next();
-};
+// 认证中间件（从 middleware/auth.js 导入）
+import { authenticate, requireAdmin } from './middleware/auth.js';
+import episodesRouter from './routes/episodes.js';
+import shotsRouter from './routes/shots.js';
+import { getFilenameForTask } from './services/filenameService.js';
 
 const FAKE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
@@ -1192,7 +1174,11 @@ app.get('/api/video-proxy', async (req, res) => {
     if (contentLength) res.setHeader('Content-Length', contentLength);
     res.setHeader('Accept-Ranges', 'bytes');
     if (req.query.download === '1') {
-      res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
+      let filename = 'video.mp4';
+      if (req.query.taskId) {
+        try { filename = getFilenameForTask(parseInt(req.query.taskId)); } catch (e) {}
+      }
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
     }
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
@@ -1249,13 +1235,13 @@ app.get('/api/projects', authenticate, (req, res) => {
 });
 
 // POST /api/projects - 创建项目
-app.post('/api/projects', authenticate, (req, res) => {
+app.post('/api/projects', authenticate, requireAdmin, (req, res) => {
   try {
-    const { name, description, settings } = req.body;
+    const { name, description, settings, code } = req.body;
     if (!name) {
       return res.status(400).json({ error: '项目名称不能为空' });
     }
-    const project = projectService.createProject({ name, description, settings, user_id: req.user.id });
+    const project = projectService.createProject({ name, description, settings, code, user_id: req.user.id });
     res.json({ success: true, data: project });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1277,7 +1263,7 @@ app.get('/api/projects/:id', authenticate, (req, res) => {
 });
 
 // PUT /api/projects/:id - 更新项目
-app.put('/api/projects/:id', authenticate, (req, res) => {
+app.put('/api/projects/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
@@ -1288,11 +1274,12 @@ app.put('/api/projects/:id', authenticate, (req, res) => {
     if (!isAdmin && project.user_id !== req.user.id) {
       return res.status(403).json({ error: '无权修改此项目' });
     }
-    const { name, description, settings, video_save_path, default_concurrent, default_min_interval, default_max_interval } = req.body;
+    const { name, description, settings, code, video_save_path, default_concurrent, default_min_interval, default_max_interval } = req.body;
     const updated = projectService.updateProject(req.params.id, {
       name,
       description,
-      settings_json: settings ? JSON.stringify(settings) : undefined,
+      settings: settings,
+      code,
       video_save_path,
       default_concurrent,
       default_min_interval,
@@ -1305,7 +1292,7 @@ app.put('/api/projects/:id', authenticate, (req, res) => {
 });
 
 // DELETE /api/projects/:id - 删除项目
-app.delete('/api/projects/:id', authenticate, (req, res) => {
+app.delete('/api/projects/:id', authenticate, requireAdmin, (req, res) => {
   try {
     const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const project = projectService.getProjectById(req.params.id, req.user.id, isAdmin);
@@ -1381,6 +1368,7 @@ app.post('/api/projects/:projectId/tasks', authenticate, (req, res) => {
       sourceTaskId,
       rowGroupId,
       outputIndex,
+      shotId,
     } = req.body || {};
 
     if (taskKind !== 'draft' && !String(prompt).trim()) {
@@ -1397,6 +1385,7 @@ app.post('/api/projects/:projectId/tasks', authenticate, (req, res) => {
       rowGroupId,
       outputIndex,
       userId: req.user.id,
+      shot_id: shotId || null,
     });
     res.json({ success: true, data: task });
   } catch (error) {
@@ -2247,6 +2236,28 @@ app.post('/api/settings/session-accounts/test', authenticate, requireAdmin, asyn
     res.status(500).json({ error: error.message });
   }
 });
+
+// POST /api/settings/session-accounts/refresh-all-credits - 刷新所有账号积分
+app.post('/api/settings/session-accounts/refresh-all-credits', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const ownerId = getSessionAccountOwnerId(req);
+    const results = await jimengCreditService.refreshAllAccountCredits(ownerId);
+    res.json({ success: true, data: results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/settings/session-accounts/:id/refresh-credits - 刷新单个账号积分
+app.post('/api/settings/session-accounts/:id/refresh-credits', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const result = await jimengCreditService.refreshAccountCredits(Number(req.params.id));
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // -------------------- 下载 API --------------------
 // GET /api/download/file?path=xxx - 下载文件

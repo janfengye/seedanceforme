@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import browserService from '../browser-service.js';
+import { assignVersionLabel } from "./versionService.js";
 import { getDatabase } from '../database/index.js';
 
 // 常量定义
@@ -199,15 +200,15 @@ function createAWSSignature(
   accessKeyId,
   secretAccessKey,
   sessionToken,
-  payload = ''
+  payload = '',
+  region = 'cn-north-1',
+  service = 'imagex'
 ) {
   const urlObj = new URL(url);
   const pathname = urlObj.pathname || '/';
 
   const timestamp = headers['x-amz-date'];
   const date = timestamp.substr(0, 8);
-  const region = 'cn-north-1';
-  const service = 'imagex';
 
   const queryParams = [];
   urlObj.searchParams.forEach((value, key) => {
@@ -509,13 +510,191 @@ async function uploadImageBuffer(buffer, sessionId, requestContext = createJimen
 }
 
 /**
+ * 解析音频时长
+ * MP3: 按 128kbps 估算
+ * WAV: 读取 byte rate (offset 28)
+ */
+function parseAudioDuration(buffer) {
+  // WAV: check RIFF header
+  if (buffer.length > 44 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
+    const byteRate = buffer.readUInt32LE(28);
+    if (byteRate > 0) {
+      const dataSize = buffer.length - 44;
+      return Math.round((dataSize / byteRate) * 1000);
+    }
+  }
+  // MP3: estimate at 128kbps
+  return Math.round(buffer.length / (128 * 1000 / 8) * 1000);
+}
+
+/**
+ * 上传音频到 VOD CDN
+ */
+async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimengRequestContext(sessionId)) {
+  console.log(`  [upload] 开始上传音频，大小：${buffer.length} 字节`);
+
+  const tokenResult = await jimengRequest(
+    'post',
+    '/mweb/v1/get_upload_token',
+    sessionId,
+    withRequestContext({ data: { scene: 1 } }, requestContext)
+  );
+
+  const { access_key_id, secret_access_key, session_token } = tokenResult;
+  if (!access_key_id || !secret_access_key || !session_token) {
+    throw new Error('获取音频上传令牌失败');
+  }
+
+  const fileSize = buffer.length;
+  const crc32 = calculateCRC32(
+    buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  );
+
+  // Step 2: ApplyUploadInner
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:\-]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+  const randomStr = Math.random().toString(36).substring(2, 12);
+  const applyUrl = `https://vod.bytedanceapi.com/?Action=ApplyUploadInner&Version=2020-08-01&SpaceName=dreamina&FileType=video&IsInner=1&FileSize=${fileSize}&s=${randomStr}`;
+
+  const reqHeaders = {
+    'x-amz-date': timestamp,
+    'x-amz-security-token': session_token,
+  };
+  const authorization = createAWSSignature(
+    'GET',
+    applyUrl,
+    reqHeaders,
+    access_key_id,
+    secret_access_key,
+    session_token,
+    '',
+    'cn-north-1',
+    'vod'
+  );
+
+  const applyResponse = await fetch(applyUrl, {
+    method: 'GET',
+    headers: {
+      accept: '*/*',
+      authorization,
+      origin: 'https://jimeng.jianying.com',
+      referer: 'https://jimeng.jianying.com/ai-tool/video/generate',
+      'user-agent': FAKE_HEADERS['User-Agent'],
+      'x-amz-date': timestamp,
+      'x-amz-security-token': session_token,
+    },
+  });
+
+  if (!applyResponse.ok)
+    throw new Error(`申请音频上传权限失败：${applyResponse.status}`);
+  const applyResult = await applyResponse.json();
+  if (applyResult?.ResponseMetadata?.Error)
+    throw new Error(`申请音频上传权限失败：${JSON.stringify(applyResult.ResponseMetadata.Error)}`);
+
+  const uploadAddress = applyResult?.Result?.InnerUploadAddress;
+  if (!uploadAddress?.StoreInfos?.length || !uploadAddress?.UploadHosts?.length) {
+    throw new Error('获取音频上传地址失败');
+  }
+
+  const storeInfo = uploadAddress.StoreInfos[0];
+  const uploadHost = uploadAddress.UploadHosts[0];
+  const uploadUrl = `https://${uploadHost}/upload/v1/${storeInfo.StoreUri}`;
+
+  console.log(`  [upload] 上传音频到：${uploadHost}`);
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Accept: '*/*',
+      Authorization: storeInfo.Auth,
+      'Content-CRC32': crc32,
+      'Content-Disposition': 'attachment; filename="audio.mp3"',
+      'Content-Type': 'application/octet-stream',
+      Origin: 'https://jimeng.jianying.com',
+      Referer: 'https://jimeng.jianying.com/ai-tool/video/generate',
+      'User-Agent': FAKE_HEADERS['User-Agent'],
+    },
+    body: buffer,
+  });
+
+  if (!uploadResponse.ok)
+    throw new Error(`音频上传失败：${uploadResponse.status}`);
+  console.log(`  [upload] 音频文件上传成功`);
+
+  // Step 4: CommitUploadInner
+  const commitUrl = `https://vod.bytedanceapi.com/?Action=CommitUploadInner&Version=2020-08-01&SpaceName=dreamina`;
+  const commitTimestamp = new Date()
+    .toISOString()
+    .replace(/[:\-]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+  const commitPayload = JSON.stringify({
+    SessionKey: uploadAddress.SessionKey,
+    Functions: [],
+  });
+  const payloadHash = crypto
+    .createHash('sha256')
+    .update(commitPayload, 'utf8')
+    .digest('hex');
+
+  const commitReqHeaders = {
+    'x-amz-date': commitTimestamp,
+    'x-amz-security-token': session_token,
+    'x-amz-content-sha256': payloadHash,
+  };
+  const commitAuth = createAWSSignature(
+    'POST',
+    commitUrl,
+    commitReqHeaders,
+    access_key_id,
+    secret_access_key,
+    session_token,
+    commitPayload,
+    'cn-north-1',
+    'vod'
+  );
+
+  const commitResponse = await fetch(commitUrl, {
+    method: 'POST',
+    headers: {
+      accept: '*/*',
+      authorization: commitAuth,
+      'content-type': 'application/json',
+      origin: 'https://jimeng.jianying.com',
+      referer: 'https://jimeng.jianying.com/ai-tool/video/generate',
+      'user-agent': FAKE_HEADERS['User-Agent'],
+      'x-amz-date': commitTimestamp,
+      'x-amz-security-token': session_token,
+      'x-amz-content-sha256': payloadHash,
+    },
+    body: commitPayload,
+  });
+
+  if (!commitResponse.ok)
+    throw new Error(`提交音频上传失败：${commitResponse.status}`);
+  const commitResult = await commitResponse.json();
+  if (commitResult?.ResponseMetadata?.Error)
+    throw new Error(`提交音频上传失败：${JSON.stringify(commitResult.ResponseMetadata.Error)}`);
+
+  const vid = commitResult?.Result?.Vid;
+  if (!vid) throw new Error('音频上传响应缺少 Vid');
+
+  const duration = parseAudioDuration(buffer);
+  console.log(`  [upload] 音频上传完成：vid=${vid}, duration=${duration}ms`);
+  return { vid, duration };
+}
+
+/**
  * 解析 prompt 中的图片占位符，构建 meta_list
  */
-function buildMetaListFromPrompt(prompt, imageCount) {
+function buildMetaListFromPrompt(prompt, imageCount, audioCount = 0) {
   const metaList = [];
-  const placeholderRegex = /@(?:图 |image)?(\d+)/gi;
+  // Match @图N, @imageN, @audioN, @音频N
+  const placeholderRegex = /@(?:图 ?|image|audio|音频 ?)(\d+)/gi;
   let lastIndex = 0;
   let match;
+  const referencedAudioIndices = new Set();
 
   while ((match = placeholderRegex.exec(prompt)) !== null) {
     if (match.index > lastIndex) {
@@ -525,13 +704,28 @@ function buildMetaListFromPrompt(prompt, imageCount) {
       }
     }
 
-    const imageIndex = parseInt(match[1]) - 1;
-    if (imageIndex >= 0 && imageIndex < imageCount) {
-      metaList.push({
-        meta_type: 'image',
-        text: '',
-        material_ref: { material_idx: imageIndex },
-      });
+    const refNum = parseInt(match[1]) - 1;
+    const refType = match[0].toLowerCase();
+    const isAudioRef = /audio|音频/.test(refType);
+
+    if (isAudioRef) {
+      if (refNum >= 0 && refNum < audioCount) {
+        metaList.push({
+          meta_type: 'audio',
+          text: '',
+          material_ref: { material_idx: refNum },
+        });
+        referencedAudioIndices.add(refNum);
+      }
+    } else {
+      // Image ref: material_idx needs audioCount offset since audio materials come first
+      if (refNum >= 0 && refNum < imageCount) {
+        metaList.push({
+          meta_type: 'image',
+          text: '',
+          material_ref: { material_idx: audioCount + refNum },
+        });
+      }
     }
 
     lastIndex = match.index + match[0].length;
@@ -550,15 +744,26 @@ function buildMetaListFromPrompt(prompt, imageCount) {
       metaList.push({
         meta_type: 'image',
         text: '',
-        material_ref: { material_idx: i },
+        material_ref: { material_idx: audioCount + i },
       });
       if (i < imageCount - 1)
         metaList.push({ meta_type: 'text', text: '和' });
     }
     if (prompt && prompt.trim()) {
-      metaList.push({ meta_type: 'text', text: `图片，${prompt}` });
-    } else {
+      metaList.push({ meta_type: 'text', text: imageCount > 0 ? `图片，${prompt}` : prompt });
+    } else if (imageCount > 0) {
       metaList.push({ meta_type: 'text', text: '图片生成视频' });
+    }
+  }
+
+  // Auto-append unreferenced audio
+  for (let i = 0; i < audioCount; i++) {
+    if (!referencedAudioIndices.has(i)) {
+      metaList.push({
+        meta_type: 'audio',
+        text: '',
+        material_ref: { material_idx: i },
+      });
     }
   }
 
@@ -606,6 +811,7 @@ async function generateSeedanceVideo(options) {
     ratio = '4:3',
     duration = 4,
     files = [],
+    audioFiles = [],
     sessionId,
     model = 'seedance-2.0',
     onProgress,
@@ -645,29 +851,61 @@ async function generateSeedanceVideo(options) {
 
   console.log(`[video] 全部 ${uploadedImages.length} 张图片上传完成`);
 
-  const materialList = uploadedImages.map((img) => ({
-    type: '',
-    id: generateUUID(),
-    material_type: 'image',
-    image_info: {
-      type: 'image',
-      id: generateUUID(),
-      source_from: 'upload',
-      platform_type: 1,
-      name: '',
-      image_uri: img.uri,
-      aigc_image: {
-        type: '',
-        id: generateUUID(),
-      },
-      width: img.width,
-      height: img.height,
-      format: '',
-      uri: img.uri,
-    },
-  }));
+  // Upload audio files
+  const uploadedAudios = [];
+  for (let i = 0; i < audioFiles.length; i++) {
+    if (onProgress) onProgress(`正在上传第 ${i + 1}/${audioFiles.length} 个音频...`);
+    console.log(`[video] 上传音频 ${i + 1}/${audioFiles.length}: ${audioFiles[i].originalname || 'audio'}`);
+    const audioResult = await uploadAudioBuffer(audioFiles[i].buffer, sessionId, requestContext);
+    uploadedAudios.push(audioResult);
+  }
+  if (uploadedAudios.length > 0) {
+    console.log(`[video] 全部 ${uploadedAudios.length} 个音频上传完成`);
+  }
 
-  const metaList = buildMetaListFromPrompt(prompt || '', uploadedImages.length);
+  // Build material list: audio first, then images (matches API capture order)
+  const materialList = [];
+
+  for (const audio of uploadedAudios) {
+    materialList.push({
+      type: '',
+      id: generateUUID(),
+      material_type: 'audio',
+      audio_info: {
+        type: 'audio',
+        source_from: 'upload',
+        vid: audio.vid,
+        duration: audio.duration,
+        name: '',
+      },
+    });
+  }
+
+  for (const img of uploadedImages) {
+    materialList.push({
+      type: '',
+      id: generateUUID(),
+      material_type: 'image',
+      image_info: {
+        type: 'image',
+        id: generateUUID(),
+        source_from: 'upload',
+        platform_type: 1,
+        name: '',
+        image_uri: img.uri,
+        aigc_image: {
+          type: '',
+          id: generateUUID(),
+        },
+        width: img.width,
+        height: img.height,
+        format: '',
+        uri: img.uri,
+      },
+    });
+  }
+
+  const metaList = buildMetaListFromPrompt(prompt || '', uploadedImages.length, uploadedAudios.length);
   const componentId = generateUUID();
   const submitId = generateUUID();
 
@@ -690,7 +928,7 @@ async function generateSeedanceVideo(options) {
       extraVipFunctionKey: isVipVisionModel ? `${modelId}-720p` : modelId,
       useVipFunctionDetailsReporterHoc: true,
     },
-    materialTypes: [1],
+    materialTypes: uploadedAudios.length > 0 ? [3, 1] : [1],
   };
 
   const metricsExtra = JSON.stringify({
@@ -998,6 +1236,15 @@ function updateTaskStatus(taskId, status, videoUrl = null, historyId = null) {
     WHERE id = ?
   `);
   stmt.run(status, videoUrl, historyId, taskId);
+
+  // 任务成功完成时自动分配版本号
+  if (status === 'done') {
+    try {
+      assignVersionLabel(taskId);
+    } catch (e) {
+      console.error('[versionService] 版本号分配失败:', e.message);
+    }
+  }
 }
 
 export {

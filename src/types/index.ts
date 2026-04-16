@@ -159,6 +159,10 @@ export interface JimengSessionAccount {
   priority: number;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string;
+  creditBalance?: number;
+  creditUpdatedAt?: string;
+  vipLevel?: number;
 }
 
 export interface JimengSessionAccountInput {
@@ -189,6 +193,7 @@ export interface Project {
   id: number;
   name: string;
   description?: string;
+  code?: string;
   settings_json?: string;
   video_save_path?: string;
   default_concurrent?: number;
@@ -246,6 +251,9 @@ export interface Task {
   completed_at?: string;
   error_message?: string | null;
   retry_count?: number;
+  shot_id?: number | null;
+  version_label?: string | null;
+  standard_filename?: string | null;
   project_name?: string;
   assets?: TaskAsset[];
 }
@@ -447,6 +455,49 @@ export interface DownloadTaskList {
   total: number;
   page: number;
   pageSize: number;
+}
+
+
+// ============================================================
+// 项目结构类型（M3+M4）
+// ============================================================
+
+export interface Episode {
+  id: number;
+  project_id: number;
+  episode_number: number;
+  title?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Shot {
+  id: number;
+  episode_id: number;
+  shot_number: number;
+  description?: string;
+  prompt?: string;
+  reference_image_url?: string;
+  preferred_model?: string;
+  status: 'active' | 'archived';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EpisodeWithShots extends Episode {
+  shots: Shot[];
+}
+
+export interface ShotVersion {
+  id: number;
+  user_id: number;
+  version_label: string;
+  status: string;
+  video_url?: string;
+  created_at: string;
+  nickname?: string;
+  username?: string;
 }
 
 // ============================================================

@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS users (
   daily_check_in INTEGER DEFAULT 0, -- 是否已签到
   last_check_in_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  username TEXT,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  username TEXT
 );
 
 -- 会话表
@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS system_config (
   key TEXT PRIMARY KEY,
   value TEXT,
   description TEXT,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  username TEXT,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  username TEXT
 );
 
 -- 创建索引
@@ -93,8 +93,9 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  settings_json TEXT -- 项目级设置（模型、比例、时长等）
-  username TEXT,
+  settings_json TEXT, -- 项目级设置（模型、比例、时长等）
+  code TEXT DEFAULT NULL,
+  username TEXT
 );
 
 -- 任务表
@@ -128,8 +129,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   error_message TEXT,
   retry_count INTEGER DEFAULT 0,
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-  FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL
-  username TEXT,
+  shot_id INTEGER DEFAULT NULL,
+  version_label TEXT DEFAULT NULL,
+  FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+  username TEXT
 );
 
 -- 任务素材表
@@ -166,16 +169,20 @@ CREATE TABLE IF NOT EXISTS jimeng_session_accounts (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE(user_id, session_id)
-  username TEXT,
+  expires_at TEXT,
+  credit_balance INTEGER DEFAULT 0,
+  credit_updated_at TEXT,
+  vip_level INTEGER DEFAULT 0,
+  UNIQUE(user_id, session_id),
+  username TEXT
 );
 
 -- 全局设置表
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  username TEXT,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  username TEXT
 );
 
 
@@ -249,6 +256,46 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('max_interval', '50000'),
   ('session_id', '');
 
+
+
+-- ============================================
+-- 项目结构模块（M3+M4）
+-- ============================================
+
+-- 集（Episode）表
+CREATE TABLE IF NOT EXISTS episodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  episode_number INTEGER NOT NULL,
+  title TEXT DEFAULT NULL,
+  description TEXT DEFAULT NULL,
+  created_at DATETIME DEFAULT (datetime('now')),
+  updated_at DATETIME DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  UNIQUE(project_id, episode_number)
+);
+
+-- 镜头（Shot）表
+CREATE TABLE IF NOT EXISTS shots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  episode_id INTEGER NOT NULL,
+  shot_number INTEGER NOT NULL,
+  description TEXT DEFAULT NULL,
+  prompt TEXT DEFAULT NULL,
+  reference_image_url TEXT DEFAULT NULL,
+  preferred_model TEXT DEFAULT NULL,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+  created_at DATETIME DEFAULT (datetime('now')),
+  updated_at DATETIME DEFAULT (datetime('now')),
+  FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+  UNIQUE(episode_id, shot_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_project_id ON episodes(project_id);
+CREATE INDEX IF NOT EXISTS idx_shots_episode_id ON shots(episode_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_code ON projects(code) WHERE code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_shot_id ON tasks(shot_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_shot_user_version ON tasks(shot_id, user_id) WHERE version_label IS NOT NULL;
 
 -- ============================================
 -- 邀请码模块表结构

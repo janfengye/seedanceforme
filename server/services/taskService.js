@@ -32,6 +32,8 @@ const TASK_COLUMNS = [
   'completed_at',
   'error_message',
   'retry_count',
+  'shot_id',
+  'version_label',
 ];
 
 const TASK_UPDATE_FIELDS = new Set(TASK_COLUMNS);
@@ -79,6 +81,8 @@ function normalizeTaskData(data = {}) {
     completed_at: pickFirstDefined(data.completedAt, data.completed_at, null),
     error_message: pickFirstDefined(data.errorMessage, data.error_message, null),
     retry_count: Number(pickFirstDefined(data.retryCount, data.retry_count, 0) || 0),
+    shot_id: pickFirstDefined(data.shotId, data.shot_id, null),
+    version_label: pickFirstDefined(data.versionLabel, data.version_label, null),
   };
 }
 
@@ -220,6 +224,7 @@ function expandDraftTaskWithDb(db, draftTaskId, options = {}) {
       status: 'pending',
       download_status: 'pending',
       account_info: draftTask.account_info,
+      shot_id: draftTask.shot_id,
     });
 
     cloneTaskAssetsWithDb(db, draftTask.id, outputTask.id);
