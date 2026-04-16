@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import * as projectService from '../services/projectService';
 import * as taskService from '../services/taskService';
 import type { InvalidBatchTask, Task, TaskAsset, TaskStatus } from '../types/index';
+import ShotSelector from '../components/ShotSelector';
 
 interface BatchManagementState {
   selectedProjectId: number | null;
@@ -98,6 +99,7 @@ export default function BatchManagementPage() {
   const [generatingTaskIds, setGeneratingTaskIds] = useState<Set<number>>(new Set());
   const [isInitializingRows, setIsInitializingRows] = useState(false);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+
   const [outputTasks, setOutputTasks] = useState<Task[]>([]);
   const savingPromptPromisesRef = useRef<Record<number, Promise<boolean>>>({});
 
@@ -525,6 +527,14 @@ export default function BatchManagementPage() {
     }
   };
 
+  const handleSaveShotId = async (taskId: number, shotId: number | null) => {
+    try {
+      await updateTaskAction(taskId, { shot_id: shotId });
+    } catch (e) {
+      console.error('保存镜头关联失败:', e);
+    }
+  };
+
   const handleGenerateTask = async (task: Task) => {
     if (!localState.selectedProjectId) {
       alert('请先选择项目');
@@ -794,6 +804,20 @@ export default function BatchManagementPage() {
                           className="w-full min-h-[112px] resize-y bg-[#0f111a] border border-gray-700 rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-purple-500"
                         />
                         <p className="mt-2 text-[11px] text-gray-500">失焦后自动保存，按 Ctrl/Cmd + Enter 也可立即保存。</p>
+                        <div className="mt-3">
+                          <ShotSelector
+                            projects={projects}
+                            selectedProjectId={localState.selectedProjectId || undefined}
+                            onShotSelect={(shot) => {
+                              handleSaveShotId(task.id, shot?.id || null);
+                              // 如果镜头有预设提示词且当前行提示词为空，自动填充
+                              if (shot?.prompt && !promptValue.trim()) {
+                                setPromptDrafts(prev => ({ ...prev, [task.id]: shot.prompt! }));
+                              }
+                            }}
+                            compact
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-4">
@@ -818,7 +842,7 @@ export default function BatchManagementPage() {
                           <label className="rounded-xl border border-gray-700 bg-[#0f111a] px-3 py-3 text-sm cursor-pointer hover:border-purple-500 transition-colors">
                             <div className="font-medium">上传图片</div>
                             <div className="mt-1 text-xs text-gray-500">
-                              {isUploadingImages ? '上传中...' : `当前 ${imageCount} 张，最多 5 张`}
+                              {isUploadingImages ? '上传中...' : `当前 ${imageCount} 张，最多 9 张`}
                             </div>
                             <input
                               type="file"

@@ -87,6 +87,7 @@ export interface GenerateVideoRequest {
   duration: Duration;
   files: File[];
   audioFiles?: File[];
+  shotId?: number;
 }
 
 export interface VideoGenerationResponse {

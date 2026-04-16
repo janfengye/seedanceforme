@@ -919,7 +919,7 @@ app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', ma
   let dbTaskId = null;
 
   try {
-    const { prompt, ratio, duration, model } = req.body;
+    const { prompt, ratio, duration, model, shotId } = req.body;
     const files = req.files?.files || [];
     const audioFiles = req.files?.audioFiles || [];
 
@@ -956,6 +956,7 @@ app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', ma
         downloadStatus: 'pending',
         progress: '正在准备...',
         startedAt: new Date().toISOString(),
+        shot_id: shotId ? parseInt(shotId) : null,
       });
       dbTaskId = createdTask.id;
       console.log(`[生成任务] 数据库记录已创建，db_task_id = ${dbTaskId}, project_id = ${defaultProject.id}`);

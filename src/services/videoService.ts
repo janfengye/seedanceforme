@@ -15,6 +15,14 @@ export async function generateVideo(
     formData.append('files', file);
   }
 
+  for (const file of request.audioFiles ?? []) {
+    formData.append('audioFiles', file);
+  }
+
+  if (request.shotId) {
+    formData.append('shotId', String(request.shotId));
+  }
+
   // 第1步: 提交任务
   onProgress?.('正在提交视频生成请求...');
   const submitRes = await fetch('/api/generate-video', {

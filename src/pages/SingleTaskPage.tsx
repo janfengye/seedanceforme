@@ -5,10 +5,14 @@ import type {
   ModelId,
   ReferenceMode,
   UploadedImage,
+  UploadedAudio,
   GenerationState,
 } from '../types/index';
 import { RATIO_OPTIONS, DURATION_OPTIONS, REFERENCE_MODES, MODEL_OPTIONS } from '../types/index';
 import { generateVideo } from '../services/videoService';
+import { getProjects } from '../services/projectService';
+import ShotSelector from '../components/ShotSelector';
+import type { Project, Shot } from '../types/index';
 import VideoPlayer from '../components/VideoPlayer';
 import { GearIcon, PlusIcon, CloseIcon, SparkleIcon } from '../components/Icons';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +21,7 @@ let nextId = 0;
 
 export default function SingleTaskPage() {
   const [images, setImages] = useState<UploadedImage[]>([]);
+  const [audioFiles, setAudioFiles] = useState<UploadedAudio[]>([]);
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<ModelId>('seedance-2.0-fast');
   const [ratio, setRatio] = useState<AspectRatio>('16:9');
@@ -26,10 +31,16 @@ export default function SingleTaskPage() {
     status: 'idle',
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const maxImages = 9;
+  const maxAudios = 3;
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAtMenu, setShowAtMenu] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedShot, setSelectedShot] = useState<Shot | null>(null);
+  const [shotMeta, setShotMeta] = useState<{ projectCode?: string; episodeNumber?: number; shotNumber?: number } | null>(null);
+  const [showShotSelector, setShowShotSelector] = useState(false);
   const [atCursorPos, setAtCursorPos] = useState(0);
   const [atSelectedIndex, setAtSelectedIndex] = useState(0);
 
@@ -70,46 +81,98 @@ export default function SingleTaskPage() {
     setImages([]);
   }, [images]);
 
+  const addAudioFiles = useCallback(
+    (fileList: FileList | null) => {
+      if (!fileList) return;
+      const remaining = maxAudios - audioFiles.length;
+      if (remaining <= 0) return;
+
+      const newFiles = Array.from(fileList)
+        .filter((f) => /\.(mp3|wav)$/i.test(f.name) || f.type.startsWith('audio/'))
+        .slice(0, remaining);
+      const newAudios: UploadedAudio[] = newFiles.map((file, i) => ({
+        id: `aud-${++nextId}`,
+        file,
+        name: file.name,
+        index: audioFiles.length + i + 1,
+      }));
+
+      setAudioFiles([...audioFiles, ...newAudios]);
+    },
+    [audioFiles]
+  );
+
+  const removeAudio = useCallback(
+    (id: string) => {
+      const updated = audioFiles
+        .filter((a) => a.id !== id)
+        .map((a, i) => ({ ...a, index: i + 1 }));
+      setAudioFiles(updated);
+    },
+    [audioFiles]
+  );
+
+  // 加载项目列表
+  useState(() => {
+    getProjects().then(setProjects).catch(() => {});
+  });
+
+  const handleShotSelect = useCallback((shot: Shot | null, meta?: { projectCode?: string; episodeNumber?: number; shotNumber?: number }) => {
+    setSelectedShot(shot);
+    setShotMeta(meta || null);
+    // 如果镜头有预设提示词且当前提示词为空，提示填充
+    if (shot?.prompt && !prompt.trim()) {
+      setPrompt(shot.prompt);
+    }
+    // 如果镜头有推荐模型，预选
+    if (shot?.preferred_model) {
+      const modelValue = shot.preferred_model as any;
+      setModel(modelValue);
+    }
+  }, [prompt]);
+
   const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursorPos = e.target.selectionStart || 0;
     setPrompt(value);
 
     // Check if user just typed '@'
-    if (images.length > 0 && cursorPos > 0 && value[cursorPos - 1] === '@') {
+    if ((images.length > 0 || audioFiles.length > 0) && cursorPos > 0 && value[cursorPos - 1] === '@') {
       setAtCursorPos(cursorPos);
       setAtSelectedIndex(0);
       setShowAtMenu(true);
     } else {
       setShowAtMenu(false);
     }
-  }, [images.length]);
+  }, [images.length, audioFiles.length]);
 
-  const insertAtReference = useCallback((index: number) => {
+  const atMenuItems = [...images.map((img) => ({ type: 'image' as const, index: img.index, label: `@${img.index}`, sublabel: `参考图 ${img.index}`, id: img.id, previewUrl: img.previewUrl })), ...audioFiles.map((aud) => ({ type: 'audio' as const, index: aud.index, label: `@Audio${aud.index}`, sublabel: aud.name, id: aud.id }))];
+
+  const insertAtReferenceItem = useCallback((item: typeof atMenuItems[0]) => {
     const before = prompt.slice(0, atCursorPos);
     const after = prompt.slice(atCursorPos);
-    setPrompt(before + index + ' ' + after);
+    const ref = item.type === 'audio' ? `Audio${item.index}` : String(item.index);
+    setPrompt(before + ref + ' ' + after);
     setShowAtMenu(false);
-    // Refocus textarea
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [prompt, atCursorPos]);
 
   const handleAtMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!showAtMenu || images.length === 0) return;
+    if (!showAtMenu || atMenuItems.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setAtSelectedIndex((prev) => (prev + 1) % images.length);
+      setAtSelectedIndex((prev) => (prev + 1) % atMenuItems.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setAtSelectedIndex((prev) => (prev - 1 + images.length) % images.length);
+      setAtSelectedIndex((prev) => (prev - 1 + atMenuItems.length) % atMenuItems.length);
     } else if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
-      insertAtReference(images[atSelectedIndex].index);
+      insertAtReferenceItem(atMenuItems[atSelectedIndex]);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setShowAtMenu(false);
     }
-  }, [showAtMenu, images, atSelectedIndex, insertAtReference]);
+  }, [showAtMenu, atMenuItems, atSelectedIndex, insertAtReferenceItem]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() && images.length === 0) return;
@@ -128,6 +191,8 @@ export default function SingleTaskPage() {
           ratio,
           duration,
           files: images.map((img) => img.file),
+          audioFiles: audioFiles.map((a) => a.file),
+          shotId: selectedShot?.id,
         },
         (progress) => {
           setGeneration((prev) => ({ ...prev, progress }));
@@ -148,11 +213,12 @@ export default function SingleTaskPage() {
         error: error instanceof Error ? error.message : '未知错误',
       });
     }
-  }, [prompt, images, model, ratio, duration, generation.status]);
+  }, [prompt, images, audioFiles, model, ratio, duration, generation.status]);
 
   const handleReset = () => {
     setPrompt('');
     clearAllImages();
+    setAudioFiles([]);
     setGeneration({ status: 'idle' });
   };
 
@@ -284,6 +350,79 @@ export default function SingleTaskPage() {
             />
           </div>
 
+          {/* Audio Upload */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-bold text-gray-300">
+                参考音频 (可选，最多 {maxAudios} 个)
+              </label>
+              {audioFiles.length > 0 && (
+                <button
+                  onClick={() => setAudioFiles([])}
+                  className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                >
+                  清除全部
+                </button>
+              )}
+            </div>
+
+            {audioFiles.length > 0 && (
+              <div className="flex flex-col gap-2 mb-3">
+                {audioFiles.map((aud) => (
+                  <div
+                    key={aud.id}
+                    className="flex items-center gap-3 bg-[#1c1f2e] border border-gray-700 rounded-xl px-3 py-2 group"
+                  >
+                    <svg className="w-5 h-5 text-purple-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                    <span className="text-sm text-gray-300 truncate flex-1">{aud.name}</span>
+                    <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-medium">@Audio{aud.index}</span>
+                    <button
+                      onClick={() => removeAudio(aud.id)}
+                      className="w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400"
+                    >
+                      <CloseIcon className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {audioFiles.length < maxAudios && (
+              <div
+                onClick={() => audioInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  addAudioFiles(e.dataTransfer.files);
+                }}
+                className="w-full h-16 border border-dashed border-gray-700 rounded-2xl flex items-center justify-center bg-[#1c1f2e] cursor-pointer hover:border-purple-500/50 hover:bg-[#25293d] transition-all"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-gray-800 rounded-lg text-gray-400">
+                    <PlusIcon className="w-4 h-4" />
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {audioFiles.length === 0
+                      ? '点击或拖拽上传音频（MP3/WAV）'
+                      : `继续添加（${audioFiles.length}/${maxAudios}）`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <input
+              ref={audioInputRef}
+              type="file"
+              accept="audio/mpeg,.mp3,audio/wav,.wav"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addAudioFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </div>
+
           {/* Prompt */}
           <div className="bg-[#1c1f2e] rounded-2xl p-4 border border-gray-800 relative">
             <label className="block text-sm font-bold mb-3 text-gray-300">
@@ -301,27 +440,65 @@ export default function SingleTaskPage() {
               disabled={isGenerating}
             />
             {/* @ Mention Popup */}
-            {showAtMenu && images.length > 0 && (
+            {showAtMenu && atMenuItems.length > 0 && (
               <div className="absolute z-50 mt-1 bg-[#252838] border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[200px]">
-                <div className="text-xs text-gray-400 px-2 py-1 mb-1">选择引用图片</div>
-                {images.map((img, idx) => (
-                  <button
-                    key={img.id}
-                    onMouseDown={(e) => { e.preventDefault(); insertAtReference(img.index); }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
-                      idx === atSelectedIndex ? 'bg-purple-500/20' : 'hover:bg-purple-500/20'
-                    }`}
-                  >
-                    <img src={img.previewUrl} alt="" className="w-8 h-8 object-cover rounded" />
-                    <span className="text-sm text-purple-400 font-medium">@{img.index}</span>
-                    <span className="text-xs text-gray-500">参考图 {img.index}</span>
-                  </button>
+                {images.length > 0 && (
+                  <div className="text-xs text-gray-400 px-2 py-1 mb-1">参考图片</div>
+                )}
+                {atMenuItems.map((item, idx) => (
+                  <div key={item.id}>
+                    {item.type === 'audio' && idx === images.length && audioFiles.length > 0 && (
+                      <div className="text-xs text-gray-400 px-2 py-1 mt-1 mb-1">参考音频</div>
+                    )}
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); insertAtReferenceItem(item); }}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
+                        idx === atSelectedIndex ? 'bg-purple-500/20' : 'hover:bg-purple-500/20'
+                      }`}
+                    >
+                      {item.type === 'image' && item.previewUrl ? (
+                        <img src={item.previewUrl} alt="" className="w-8 h-8 object-cover rounded" />
+                      ) : (
+                        <svg className="w-8 h-8 text-purple-400 p-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                      )}
+                      <span className="text-sm text-purple-400 font-medium">{item.label}</span>
+                      <span className="text-xs text-gray-500 truncate">{item.sublabel}</span>
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
             <div className="text-right text-xs text-gray-500 mt-2">
               {prompt.length}/5000
             </div>
+          </div>
+
+          {/* Shot Selector */}
+          <div className="bg-[#1c1f2e] rounded-2xl border border-gray-800 overflow-hidden">
+            <button
+              onClick={() => setShowShotSelector(!showShotSelector)}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-300 hover:bg-[#25293d] transition-colors"
+            >
+              <span className="font-bold">
+                {selectedShot
+                  ? `已关联：${shotMeta?.projectCode || '?'}-${shotMeta?.episodeNumber}-${shotMeta?.shotNumber}`
+                  : '关联镜头（可选）'}
+              </span>
+              <span className="text-gray-500">{showShotSelector ? '▲' : '▼'}</span>
+            </button>
+            {showShotSelector && (
+              <div className="px-4 pb-4">
+                <ShotSelector
+                  projects={projects}
+                  onShotSelect={handleShotSelect}
+                />
+                {selectedShot && shotMeta?.projectCode && (
+                  <div className="mt-2 text-xs text-blue-400">
+                    文件名预览：{shotMeta.projectCode}-{shotMeta.episodeNumber}-{shotMeta.shotNumber}-?-昵称.mp4
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Settings */}
