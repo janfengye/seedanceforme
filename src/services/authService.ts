@@ -545,6 +545,27 @@ export async function updateUserCredits(
 /**
  * 重置用户密码
  */
+export async function deleteUser(userId: number): Promise<void> {
+  const sessionId = getSessionId();
+
+  if (!sessionId) {
+    throw new Error('未登录');
+  }
+
+  const response = await fetch(`${API_BASE}/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: {
+      'X-Session-ID': sessionId,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || '删除用户失败');
+  }
+}
+
 export async function resetUserPassword(userId: number, newPassword: string): Promise<void> {
   const sessionId = getSessionId();
 

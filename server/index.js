@@ -3210,6 +3210,42 @@ app.post('/api/admin/config', authenticate, requireAdmin, async (req, res) => {
 // 邀请码管理 API (管理员)
 // ============================================================
 
+// DELETE /api/admin/users/:id - 删除用户
+app.delete('/api/admin/users/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const db = getDatabase();
+
+    // 不允许删除自己
+    if (userId === req.user.id) {
+      return res.status(400).json({ error: '不能删除自己的账号' });
+    }
+
+    // 检查用户是否存在
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    // 删除用户相关数据（级联删除会处理 sessions, check_ins 等）
+    // 先删除非级联的关联数据
+    db.prepare('DELETE FROM jimeng_session_accounts WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM task_assets WHERE task_id IN (SELECT id FROM tasks WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM generation_history WHERE task_id IN (SELECT id FROM tasks WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM tasks WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM batches WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM projects WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM check_ins WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM invitation_usage WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/admin/invitation-codes - 获取邀请码列表
 app.get('/api/admin/invitation-codes', authenticate, requireAdmin, (req, res) => {
   try {
@@ -3311,6 +3347,42 @@ app.delete('/api/admin/invitation-codes/:id', authenticate, requireAdmin, (req, 
   try {
     const db = getDatabase();
     db.prepare('DELETE FROM invitation_codes WHERE id = ?').run(Number(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/admin/users/:id - 删除用户
+app.delete('/api/admin/users/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const db = getDatabase();
+
+    // 不允许删除自己
+    if (userId === req.user.id) {
+      return res.status(400).json({ error: '不能删除自己的账号' });
+    }
+
+    // 检查用户是否存在
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    // 删除用户相关数据（级联删除会处理 sessions, check_ins 等）
+    // 先删除非级联的关联数据
+    db.prepare('DELETE FROM jimeng_session_accounts WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM task_assets WHERE task_id IN (SELECT id FROM tasks WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM generation_history WHERE task_id IN (SELECT id FROM tasks WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM tasks WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM batches WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)').run(userId);
+    db.prepare('DELETE FROM projects WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM check_ins WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM invitation_usage WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });

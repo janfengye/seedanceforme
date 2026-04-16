@@ -5,6 +5,7 @@ import {
   updateUserStatus,
   updateUserCredits,
   resetUserPassword,
+  deleteUser,
 } from '../services/authService';
 import {
   getInvitationCodes,
@@ -140,6 +141,21 @@ export default function AdminPage() {
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+    if (!confirm(`确定要删除用户「${(selectedUser as any).username || selectedUser.email}」吗？\n\n该操作不可恢复，将同时删除该用户的所有项目、任务和数据。`)) return;
+
+    try {
+      await deleteUser(selectedUser.id);
+      setShowUserModal(false);
+      loadUsers(currentPage);
+      loadStats();
+      alert('用户已删除');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除用户失败');
+    }
+  };
+
   const handleResetPassword = async () => {
     if (!selectedUser) return;
 
@@ -225,7 +241,6 @@ export default function AdminPage() {
             <StatCard title="活跃用户" value={stats.activeUsers} icon={CheckIcon} color="bg-gradient-to-br from-green-500 to-emerald-500" />
             <StatCard title="总项目数" value={stats.totalProjects} icon={SparkleIcon} color="bg-gradient-to-br from-purple-500 to-pink-500" />
             <StatCard title="总任务数" value={stats.totalTasks} icon={ShieldIcon} color="bg-gradient-to-br from-amber-500 to-orange-500" />
-            <StatCard title="今日签到" value={stats.todayCheckIns} icon={CheckIcon} color="bg-gradient-to-br from-rose-500 to-red-500" />
             <StatCard title="发放积分" value={stats.totalCreditsIssued} icon={SparkleIcon} color="bg-gradient-to-br from-indigo-500 to-violet-500" />
           </div>
         )}
@@ -301,7 +316,7 @@ export default function AdminPage() {
                     <thead className="bg-[#0f111a]">
                       <tr>
                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">ID</th>
-                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">邮箱</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">用户名</th>
                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">角色</th>
                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">状态</th>
                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase">积分</th>
@@ -313,7 +328,7 @@ export default function AdminPage() {
                       {users.map((user) => (
                         <tr key={user.id} className="hover:bg-[#0f111a]/50">
                           <td className="px-6 py-4 text-sm text-gray-400">#{user.id}</td>
-                          <td className="px-6 py-4 text-sm text-white">{user.email}</td>
+                          <td className="px-6 py-4 text-sm text-white">{(user as any).username || user.email}</td>
                           <td className="px-6 py-4 text-sm">
                             <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                               user.role === 'admin'
@@ -494,7 +509,7 @@ export default function AdminPage() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-[#1c1f2e] border border-gray-800 rounded-2xl p-6 w-full max-w-md">
               <h3 className="text-xl font-semibold text-white mb-6">
-                编辑用户 - {selectedUser.email}
+                编辑用户 - {(selectedUser as any).username || selectedUser.email}
               </h3>
 
               <div className="space-y-4">
@@ -531,16 +546,25 @@ export default function AdminPage() {
                     重置密码
                   </button>
                   <button
-                    onClick={() => setShowUserModal(false)}
-                    className="flex-1 px-4 py-3 bg-[#0f111a] border border-gray-700 text-white hover:bg-gray-800 rounded-xl font-medium transition-all"
-                  >
-                    取消
-                  </button>
-                  <button
                     onClick={handleUpdateCredits}
                     className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium transition-all"
                   >
-                    保存
+                    保存积分
+                  </button>
+                </div>
+
+                <div className="flex gap-3 mt-3">
+                  <button
+                    onClick={handleDeleteUser}
+                    className="flex-1 px-4 py-3 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-xl font-medium transition-all border border-red-500/30"
+                  >
+                    删除账号
+                  </button>
+                  <button
+                    onClick={() => setShowUserModal(false)}
+                    className="flex-1 px-4 py-3 bg-[#0f111a] border border-gray-700 text-white hover:bg-gray-800 rounded-xl font-medium transition-all"
+                  >
+                    关闭
                   </button>
                 </div>
               </div>
