@@ -27,6 +27,16 @@ interface MenuItem {
   icon: React.ComponentType<{ className?: string }>;
   adminOnly?: boolean;
   accent?: string;
+  matchExact?: boolean;
+}
+
+// Inline FolderIcon since it's not in Icons.tsx
+function FolderIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+    </svg>
+  );
 }
 
 export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
@@ -35,18 +45,25 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isActive = (path: string) => {
-    if (path === '/') {
-      return location.pathname === '/';
+  const isActive = (path: string, matchExact?: boolean) => {
+    if (matchExact || path === '/') {
+      return location.pathname === path;
     }
     return location.pathname.startsWith(path);
   };
 
   const menuItems: MenuItem[] = [
     {
-      id: 'SINGLE_TASK',
-      label: '单任务生成',
+      id: 'PROJECTS',
+      label: '项目管理',
       path: '/',
+      icon: FolderIcon,
+      matchExact: true,
+    },
+    {
+      id: 'SINGLE_TASK',
+      label: '快速生成',
+      path: '/generate',
       icon: FilmIcon,
     },
     {
@@ -135,26 +152,33 @@ export default function Sidebar({ currentUser, onLogout }: SidebarProps) {
         <nav className="p-3 space-y-1">
           {visibleItems.map((item) => {
             const Icon = item.icon;
-            const active = isActive(item.path);
+            const active = isActive(item.path, item.matchExact);
+
+            // 在项目管理和快速生成之间不加分隔线，在下载管理和个人设置之间加
+            const showSeparator = item.id === 'PROFILE' || item.id === 'ADMIN';
 
             return (
-              <Link
-                key={item.id}
-                to={item.path}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
-                  active
-                    ? 'bg-purple-500/20 text-purple-400'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                } ${!expanded && 'justify-center'}`}
-              >
-                <Icon className={`w-5 h-5 flex-shrink-0 ${item.accent || ''}`} />
-                {expanded && (
-                  <span className={`text-sm font-medium ${item.accent || ''}`}>
-                    {item.label}
-                  </span>
+              <div key={item.id}>
+                {showSeparator && (
+                  <div className="my-2 border-t border-gray-700/50" />
                 )}
-              </Link>
+                <Link
+                  to={item.path}
+                  onClick={() => setMobileOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                    active
+                      ? 'bg-purple-500/20 text-purple-400'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  } ${!expanded && 'justify-center'}`}
+                >
+                  <Icon className={`w-5 h-5 flex-shrink-0 ${item.accent || ''}`} />
+                  {expanded && (
+                    <span className={`text-sm font-medium ${item.accent || ''}`}>
+                      {item.label}
+                    </span>
+                  )}
+                </Link>
+              </div>
             );
           })}
         </nav>

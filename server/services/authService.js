@@ -198,7 +198,7 @@ export async function registerUser(username, password) {
 
   // 获取用户信息
   const user = db.prepare(`
-    SELECT id, email, username, role, status, credits, created_at
+    SELECT id, email, username, nickname, role, status, credits, created_at
     FROM users
     WHERE id = ?
   `).get(result.lastInsertRowid);
@@ -209,6 +209,7 @@ export async function registerUser(username, password) {
       id: user.id,
       email: user.email,
       username: user.username,
+      nickname: user.nickname || null,
       role: user.role,
       status: user.status,
       credits: user.credits,
@@ -225,7 +226,7 @@ export async function loginUser(username, password) {
 
   // 查找用户（支持 username 登录）
   const user = db.prepare(`
-    SELECT id, email, username, password_hash, role, status, credits
+    SELECT id, email, username, nickname, password_hash, role, status, credits
     FROM users
     WHERE username = ?
   `).get(username);
@@ -261,6 +262,7 @@ export async function loginUser(username, password) {
       id: user.id,
       email: user.email,
       username: user.username,
+      nickname: user.nickname || null,
       role: user.role,
       status: user.status,
       credits: user.credits

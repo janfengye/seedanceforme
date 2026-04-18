@@ -1,3 +1,4 @@
+import { ToastProvider } from './components/Toast';
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
@@ -10,8 +11,10 @@ import BatchManagementPage from './pages/BatchManagement';
 import SettingsPage from './pages/Settings';
 import ProfilePage from './pages/ProfilePage';
 import DownloadManagementPage from './pages/DownloadManagement';
-import ProjectDetailPage from './pages/ProjectDetailPage';
+import ProjectWorkspacePage from './pages/ProjectWorkspacePage';
+import ProjectsPage from './pages/ProjectsPage';
 import type { User } from './types';
+import NicknamePromptModal from './components/NicknamePromptModal';
 import { getCurrentUser } from './services/authService';
 
 // 受保护的路由组件
@@ -49,6 +52,26 @@ function MainLayout({
     <div className="min-h-screen bg-[#0f111a]">
       <Sidebar currentUser={currentUser} onLogout={onLogout} />
       <main className="lg:pl-60 pt-16 lg:pt-0 min-h-screen">
+        {children}
+      </main>
+    </div>
+  );
+}
+
+// 工作台布局（无侧边栏 padding，全屏使用）
+function WorkspaceLayout({
+  currentUser,
+  onLogout,
+  children,
+}: {
+  currentUser: User | null;
+  onLogout: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-[#0f111a]">
+      <Sidebar currentUser={currentUser} onLogout={onLogout} />
+      <main className="lg:pl-60 pt-16 lg:pt-0 h-screen overflow-hidden">
         {children}
       </main>
     </div>
@@ -103,6 +126,9 @@ function AppContent() {
 
   return (
     <AppProvider currentUser={currentUser}>
+      {currentUser && !currentUser.nickname && (
+        <NicknamePromptModal currentUser={currentUser} onNicknameSet={handleUserUpdate} />
+      )}
       <Routes>
         {/* 公开路由 */}
         <Route
@@ -129,6 +155,16 @@ function AppContent() {
         {/* 受保护的路由 */}
         <Route
           path="/"
+          element={
+            <ProtectedRoute currentUser={currentUser}>
+              <MainLayout currentUser={currentUser} onLogout={handleLogout}>
+                <ProjectsPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/generate"
           element={
             <ProtectedRoute currentUser={currentUser}>
               <MainLayout currentUser={currentUser} onLogout={handleLogout}>
@@ -188,13 +224,14 @@ function AppContent() {
           }
         />
 
+        {/* 项目工作台 - 使用全屏布局 */}
         <Route
           path="/projects/:id"
           element={
             <ProtectedRoute currentUser={currentUser}>
-              <MainLayout currentUser={currentUser} onLogout={handleLogout}>
-                <ProjectDetailPage currentUser={currentUser} />
-              </MainLayout>
+              <WorkspaceLayout currentUser={currentUser} onLogout={handleLogout}>
+                <ProjectWorkspacePage currentUser={currentUser} />
+              </WorkspaceLayout>
             </ProtectedRoute>
           }
         />
@@ -208,8 +245,8 @@ function AppContent() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter><ToastProvider>
       <AppContent />
-    </BrowserRouter>
+    </ToastProvider></BrowserRouter>
   );
 }

@@ -24,6 +24,10 @@ function mapAccount(row) {
     priority: row.priority !== undefined ? Number(row.priority) || 0 : 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    expiresAt: row.expires_at || null,
+    creditBalance: row.credit_balance || 0,
+    creditUpdatedAt: row.credit_updated_at || null,
+    vipLevel: row.vip_level || 0,
   };
 }
 
@@ -38,14 +42,16 @@ function maskSessionId(sessionId) {
   return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
 }
 
-function getEnabledAccountRows(userId) {
+function getEnabledAccountRows() {
   const db = getDatabase();
   return db.prepare(`
     SELECT *
     FROM jimeng_session_accounts
-    WHERE user_id = ? AND is_enabled = 1
+    WHERE is_enabled = 1
+      AND (expires_at IS NULL OR expires_at > datetime('now'))
+      AND (credit_updated_at IS NULL OR credit_balance > 0)
     ORDER BY priority ASC, id ASC
-  `).all(userId);
+  `).all();
 }
 
 function rebalancePriorities(userId) {
@@ -75,6 +81,8 @@ function ensureDefaultAccount(userId) {
     SELECT id
     FROM jimeng_session_accounts
     WHERE user_id = ? AND is_enabled = 1
+      AND (expires_at IS NULL OR expires_at > datetime('now'))
+      AND (credit_updated_at IS NULL OR credit_balance > 0)
     ORDER BY priority ASC, id ASC
     LIMIT 1
   `).get(userId);
@@ -113,20 +121,19 @@ function syncAccountOrdering(userId) {
   transaction();
 }
 
-export function listUserAccounts(userId) {
+export function listUserAccounts() {
   const db = getDatabase();
   const rows = db.prepare(`
     SELECT *
     FROM jimeng_session_accounts
-    WHERE user_id = ?
     ORDER BY is_enabled DESC, priority ASC, id ASC
-  `).all(userId);
+  `).all();
 
   return rows.map(mapAccount);
 }
 
-export function listActiveAccounts(userId) {
-  return getEnabledAccountRows(userId).map(mapAccount);
+export function listActiveAccounts() {
+  return getEnabledAccountRows().map(mapAccount);
 }
 
 export function createUserAccount(userId, payload) {
@@ -302,7 +309,7 @@ export async function testSessionId(sessionId) {
 }
 
 export function resolveEffectiveSessions(userId) {
-  const accounts = listActiveAccounts(userId);
+  const accounts = listActiveAccounts();
   if (accounts.length > 0) {
     return {
       source: 'user_default',
@@ -387,6 +394,33 @@ export function formatAccountInfo(account) {
   });
 }
 
+
+export async function keepAliveSessions() {
+  const accounts = getEnabledAccountRows();
+  if (accounts.length === 0) return;
+
+  console.log(`[keepalive] 开始验证 ${accounts.length} 个账号的 Session 有效性...`);
+  for (const row of accounts) {
+    try {
+      const result = await testSessionId(row.session_id);
+      if (result.success) {
+        console.log(`[keepalive] ✅ ${row.name || row.id} (${row.session_id.substring(0, 8)}...) 有效`);
+      } else {
+        console.warn(`[keepalive] ❌ ${row.name || row.id} (${row.session_id.substring(0, 8)}...) 失效: ${result.error}`);
+        // 标记为禁用
+        const db = getDatabase();
+        db.prepare('UPDATE jimeng_session_accounts SET is_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(row.id);
+        console.warn(`[keepalive] 已自动禁用账号: ${row.name || row.id}`);
+      }
+    } catch (e) {
+      console.warn(`[keepalive] ⚠ ${row.name || row.id} 验证异常: ${e.message}`);
+    }
+    // 间隔 2 秒，避免请求过快
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  console.log('[keepalive] 验证完成');
+}
+
 export default {
   listUserAccounts,
   listActiveAccounts,
@@ -396,6 +430,7 @@ export default {
   setDefaultAccount,
   deleteUserAccount,
   testSessionId,
+  keepAliveSessions,
   resolveEffectiveSessions,
   resolveEffectiveSession,
   formatAccountInfo,

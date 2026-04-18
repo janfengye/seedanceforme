@@ -118,12 +118,21 @@ function shouldSkipMigration(db, file) {
     if (hasEpisodes) return true;
   }
 
-  return false;
+  if (file === '20260416_add_task_config.sql') {
+    const columns = db.prepare(`PRAGMA table_info(tasks)`).all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    return columnNames.has('task_config');
+  }
 
   if (file === '20260416_account_credits.sql') {
     const columns = db.prepare(`PRAGMA table_info(jimeng_session_accounts)`).all();
     const columnNames = new Set(columns.map((column) => column.name));
     return columnNames.has('expires_at');
+  }
+
+  if (file === '20260418_add_shot_drafts.sql') {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shot_drafts'").all();
+    return tables.length > 0;
   }
 }
 

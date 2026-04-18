@@ -114,6 +114,27 @@ export async function testJimengSessionId(
   return result;
 }
 
+
+export async function refreshAccountCredits(accountId: number) {
+  const response = await fetch(`${API_BASE}/settings/session-accounts/${accountId}/refresh-credits`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || '刷新积分失败');
+  return result.data;
+}
+
+export async function refreshAllAccountCredits() {
+  const response = await fetch(`${API_BASE}/settings/session-accounts/refresh-all-credits`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || '刷新积分失败');
+  return result.data;
+}
+
 export default {
   getSettings,
   updateSettings,
@@ -122,4 +143,25 @@ export default {
   updateSessionAccount,
   deleteSessionAccount,
   testJimengSessionId,
+  refreshAccountCredits,
+  refreshAllAccountCredits,
 };
+
+export async function signAll(): Promise<{results: any[]}> {
+  const response = await fetch(`${API_BASE}/jimeng/sign-all`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || '签到失败');
+  return result.data;
+}
+
+export async function getSignStatus(): Promise<any[]> {
+  const response = await fetch(`${API_BASE}/jimeng/sign-status`, {
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || '获取签到状态失败');
+  return result.data;
+}

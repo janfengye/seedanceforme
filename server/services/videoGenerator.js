@@ -556,7 +556,7 @@ async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimen
     .replace(/[:\-]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
   const randomStr = Math.random().toString(36).substring(2, 12);
-  const applyUrl = `https://vod.bytedanceapi.com/?Action=ApplyUploadInner&Version=2020-08-01&SpaceName=dreamina&FileType=video&IsInner=1&FileSize=${fileSize}&s=${randomStr}`;
+  const applyUrl = `https://vod.bytedanceapi.com/?Action=ApplyUploadInner&Version=2020-11-19&SpaceName=dreamina&FileType=video&IsInner=1&FileSize=${fileSize}&s=${randomStr}`;
 
   const reqHeaders = {
     'x-amz-date': timestamp,
@@ -594,12 +594,15 @@ async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimen
     throw new Error(`申请音频上传权限失败：${JSON.stringify(applyResult.ResponseMetadata.Error)}`);
 
   const uploadAddress = applyResult?.Result?.InnerUploadAddress;
-  if (!uploadAddress?.StoreInfos?.length || !uploadAddress?.UploadHosts?.length) {
+  const uploadNode = uploadAddress?.UploadNodes?.[0];
+  if (!uploadNode?.StoreInfos?.length || !uploadNode?.UploadHost) {
     throw new Error('获取音频上传地址失败');
   }
 
-  const storeInfo = uploadAddress.StoreInfos[0];
-  const uploadHost = uploadAddress.UploadHosts[0];
+  const storeInfo = uploadNode.StoreInfos[0];
+  const uploadHost = uploadNode.UploadHost;
+  const sessionKey = uploadNode.SessionKey;
+  const uploadVid = uploadNode.Vid;
   const uploadUrl = `https://${uploadHost}/upload/v1/${storeInfo.StoreUri}`;
 
   console.log(`  [upload] 上传音频到：${uploadHost}`);
@@ -624,13 +627,13 @@ async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimen
   console.log(`  [upload] 音频文件上传成功`);
 
   // Step 4: CommitUploadInner
-  const commitUrl = `https://vod.bytedanceapi.com/?Action=CommitUploadInner&Version=2020-08-01&SpaceName=dreamina`;
+  const commitUrl = `https://vod.bytedanceapi.com/?Action=CommitUploadInner&Version=2020-11-19&SpaceName=dreamina`;
   const commitTimestamp = new Date()
     .toISOString()
     .replace(/[:\-]/g, '')
     .replace(/\.\d{3}Z$/, 'Z');
   const commitPayload = JSON.stringify({
-    SessionKey: uploadAddress.SessionKey,
+    SessionKey: sessionKey,
     Functions: [],
   });
   const payloadHash = crypto
@@ -677,8 +680,8 @@ async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimen
   if (commitResult?.ResponseMetadata?.Error)
     throw new Error(`提交音频上传失败：${JSON.stringify(commitResult.ResponseMetadata.Error)}`);
 
-  const vid = commitResult?.Result?.Vid;
-  if (!vid) throw new Error('音频上传响应缺少 Vid');
+  const vid = commitResult?.Result?.Vid || commitResult?.Result?.Results?.[0]?.Uri;
+  if (!vid) throw new Error('音频上传响应缺少 Vid/Uri');
 
   const duration = parseAudioDuration(buffer);
   console.log(`  [upload] 音频上传完成：vid=${vid}, duration=${duration}ms`);
@@ -819,6 +822,8 @@ async function generateSeedanceVideo(options) {
     onHistoryId,
     onItemId,
     onVideoReady,
+    preUploadedUris = [],
+    preUploadedIndices = [],
   } = options;
 
   const requestContext = getRequestContext(options);
@@ -839,14 +844,49 @@ async function generateSeedanceVideo(options) {
   if (onProgress) onProgress('正在上传参考图片...');
 
   const uploadedImages = [];
-  for (let i = 0; i < files.length; i++) {
-    if (onProgress) onProgress(`正在上传第 ${i + 1}/${files.length} 张图片...`);
-    console.log(
-      `[video] 上传图片 ${i + 1}/${files.length}: ${files[i].originalname}`
-    );
 
-    const imageUri = await uploadImageBuffer(files[i].buffer, sessionId, requestContext);
-    uploadedImages.push({ uri: imageUri, width, height });
+  // Merge pre-uploaded and new uploads in original order
+  if (preUploadedUris.length > 0 && preUploadedIndices.length > 0) {
+    const totalCount = preUploadedUris.length + files.length;
+    const preUploadedMap = new Map();
+    for (let i = 0; i < preUploadedIndices.length; i++) {
+      preUploadedMap.set(preUploadedIndices[i], preUploadedUris[i]);
+    }
+    let fileIdx = 0;
+    for (let i = 0; i < totalCount; i++) {
+      if (preUploadedMap.has(i)) {
+        const uri = preUploadedMap.get(i);
+        uploadedImages.push({ uri, width, height });
+        console.log(`[video] 使用预上传图片[${i}]: ${uri.substring(0, 60)}...`);
+      } else {
+        if (fileIdx < files.length) {
+          if (onProgress) onProgress(`正在上传第 ${fileIdx + 1}/${files.length} 张图片...`);
+          console.log(`[video] 上传图片[${i}] ${fileIdx + 1}/${files.length}: ${files[fileIdx].originalname}`);
+          const imageUri = await uploadImageBuffer(files[fileIdx].buffer, sessionId, requestContext);
+          uploadedImages.push({ uri: imageUri, width, height });
+          fileIdx++;
+        }
+      }
+    }
+  } else if (preUploadedUris.length > 0) {
+    // No indices provided, append pre-uploaded first then files
+    for (const uri of preUploadedUris) {
+      uploadedImages.push({ uri, width, height });
+      console.log(`[video] 使用预上传图片: ${uri.substring(0, 60)}...`);
+    }
+    for (let i = 0; i < files.length; i++) {
+      if (onProgress) onProgress(`正在上传第 ${i + 1}/${files.length} 张图片...`);
+      const imageUri = await uploadImageBuffer(files[i].buffer, sessionId, requestContext);
+      uploadedImages.push({ uri: imageUri, width, height });
+    }
+  } else {
+    // No pre-uploaded, upload all
+    for (let i = 0; i < files.length; i++) {
+      if (onProgress) onProgress(`正在上传第 ${i + 1}/${files.length} 张图片...`);
+      console.log(`[video] 上传图片 ${i + 1}/${files.length}: ${files[i].originalname}`);
+      const imageUri = await uploadImageBuffer(files[i].buffer, sessionId, requestContext);
+      uploadedImages.push({ uri: imageUri, width, height });
+    }
   }
 
   console.log(`[video] 全部 ${uploadedImages.length} 张图片上传完成`);

@@ -74,3 +74,24 @@ body {
 .animate-progress {
   animation: progress-indeterminate 2s ease-in-out infinite;
 }
+
+/* Toast slide-in animation */
+@keyframes slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
+/* Loading bar animation for template loading */
+@keyframes loading-bar {
+  0% { width: 5%; margin-left: 0; }
+  25% { width: 40%; margin-left: 10%; }
+  50% { width: 30%; margin-left: 50%; }
+  75% { width: 40%; margin-left: 40%; }
+  100% { width: 5%; margin-left: 95%; }
+}
+.animate-loading-bar {
+  animation: loading-bar 2s ease-in-out infinite;
+}

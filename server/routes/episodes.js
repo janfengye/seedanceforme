@@ -20,7 +20,7 @@ router.get('/projects/:projectId/episodes', authenticate, (req, res) => {
 });
 
 // POST /api/projects/:projectId/episodes — 管理员
-router.post('/projects/:projectId/episodes', authenticate, requireAdmin, (req, res) => {
+router.post('/projects/:projectId/episodes', authenticate, (req, res) => {
   try {
     const project = projectService.getProjectById(req.params.projectId);
     if (!project) {

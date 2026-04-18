@@ -34,6 +34,38 @@ router.get('/projects/:projectId/shot-tree', authenticate, (req, res) => {
   }
 });
 
+// GET /api/shots/:id — 登录用户（获取镜头详情，含集和项目信息）
+router.get('/shots/:id', authenticate, (req, res) => {
+  try {
+    const shot = shotService.getShotById(req.params.id);
+    if (!shot) {
+      return res.status(404).json({ error: '镜头不存在' });
+    }
+    // Enrich with episode and project info
+    const episode = episodeService.getEpisodeById(shot.episode_id);
+    let projectCode, projectId, episodeNumber;
+    if (episode) {
+      episodeNumber = episode.episode_number;
+      projectId = episode.project_id;
+      const project = projectService.getProjectById(episode.project_id);
+      if (project) {
+        projectCode = project.code;
+      }
+    }
+    res.json({
+      success: true,
+      data: {
+        ...shot,
+        episode_number: episodeNumber,
+        project_id: projectId,
+        project_code: projectCode,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/shots/:id/versions — 登录用户（获取镜头版本列表）
 router.get('/shots/:id/versions', authenticate, (req, res) => {
   try {
@@ -49,7 +81,7 @@ router.get('/shots/:id/versions', authenticate, (req, res) => {
 });
 
 // POST /api/episodes/:episodeId/shots — 管理员
-router.post('/episodes/:episodeId/shots', authenticate, requireAdmin, (req, res) => {
+router.post('/episodes/:episodeId/shots', authenticate, (req, res) => {
   try {
     const episode = episodeService.getEpisodeById(req.params.episodeId);
     if (!episode) {

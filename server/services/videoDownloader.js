@@ -269,13 +269,17 @@ export function getDownloadTasks(options = {}) {
     pageSize = 20,
     userId = null,
     isAdmin = false,
+    projectId = null,
+    source = "all",
+    creatorId = null,
+    dateFrom = null, dateTo = null,
   } = options;
 
   const whereClauses = ["t.task_kind = 'output'"];
   const params = [];
 
-  // 非管理员用户只能查看自己的任务
-  if (!isAdmin && userId !== null) {
+  // 所有用户可查看全部任务（团队共享）
+  if (false) { // 团队共享：所有用户可见
     whereClauses.push('t.user_id = ?');
     params.push(userId);
   }
@@ -289,6 +293,32 @@ export function getDownloadTasks(options = {}) {
       whereClauses.push('t.download_status = ?');
       params.push(status);
     }
+  }
+
+  if (projectId) {
+    whereClauses.push('t.project_id = ?');
+    params.push(projectId);
+  }
+
+  if (source && source !== 'all') {
+    if (source === 'project') whereClauses.push('t.shot_id IS NOT NULL');
+    if (source === 'single') whereClauses.push('t.shot_id IS NULL AND t.account_info IS NOT NULL');
+    if (source === 'jimeng') whereClauses.push('t.account_info IS NULL');
+  }
+
+  if (creatorId) {
+    whereClauses.push('t.user_id = ?');
+    params.push(Number(creatorId));
+  }
+
+  if (dateFrom) {
+    whereClauses.push('t.created_at >= ?');
+    params.push(dateFrom);
+  }
+
+  if (dateTo) {
+    whereClauses.push('t.created_at <= ?');
+    params.push(dateTo + 'T23:59:59');
   }
 
   if (type !== 'all' && type !== 'video') {
@@ -322,7 +352,14 @@ export function getDownloadTasks(options = {}) {
       t.output_index,
       t.created_at,
       t.completed_at,
+      t.shot_id,
+      t.version_label,
       p.name as project_name,
+      p.code as project_code,
+      s.shot_number,
+      e.episode_number,
+      u.nickname,
+      u.username,
       CASE
         WHEN t.status = 'generating' OR (t.history_id IS NOT NULL AND t.video_url IS NULL AND t.status != 'cancelled') THEN 'generating'
         WHEN t.status = 'done' AND t.video_url IS NOT NULL AND (t.download_status IS NULL OR t.download_status = 'pending') THEN 'pending'
@@ -333,6 +370,9 @@ export function getDownloadTasks(options = {}) {
       END as effective_download_status
     FROM tasks t
     LEFT JOIN projects p ON t.project_id = p.id
+    LEFT JOIN shots s ON t.shot_id = s.id
+    LEFT JOIN episodes e ON s.episode_id = e.id
+    LEFT JOIN users u ON t.user_id = u.id
     ${whereClause}
     ORDER BY t.created_at DESC
     LIMIT ? OFFSET ?

@@ -71,6 +71,8 @@ export interface UploadedImage {
   file: File;
   previewUrl: string;
   index: number;
+  cdnUri?: string;
+  uploadStatus?: 'pending' | 'uploading' | 'done' | 'error';
 }
 
 export interface UploadedAudio {
@@ -163,6 +165,10 @@ export interface JimengSessionAccount {
   expiresAt?: string;
   creditBalance?: number;
   creditUpdatedAt?: string;
+  giftCredit?: number;
+  purchaseCredit?: number;
+  vipCredit?: number;
+  lastSignAt?: string;
   vipLevel?: number;
 }
 
@@ -202,6 +208,8 @@ export interface Project {
   default_max_interval?: number;
   task_count?: number;
   completed_count?: number;
+  episode_count?: number;
+  shot_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -443,8 +451,15 @@ export interface DownloadTask {
   created_at: string;
   completed_at?: string;
   project_name?: string;
+  project_code?: string;
+  episode_number?: number;
+  shot_number?: number;
+  version_label?: string;
+  shot_id?: number;
   hasHistory: boolean;
   model_type: 'image' | 'video';
+  nickname?: string;
+  username?: string;
   effective_download_status: DownloadStatus;
 }
 
@@ -525,4 +540,17 @@ export interface InvitationUsage {
   user_id: number;
   user_email?: string;
   used_at: string;
+}
+
+// ============================================================
+// 任务配置类型（下载详情展开用）
+// ============================================================
+
+export interface TaskConfig {
+  prompt: string;
+  model: string;
+  ratio: string;
+  duration: number;
+  shotId?: number;
+  assets?: Array<{ type: 'image' | 'audio'; filename: string; originalname: string }>;
 }

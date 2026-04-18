@@ -1,4 +1,5 @@
 import type { User, LoginCredentials, RegisterCredentials, AuthResponse } from '../types';
+import { clearAllDrafts } from '../hooks/useDraftPersistence';
 
 const API_BASE = '/api';
 
@@ -132,6 +133,7 @@ export async function logout(): Promise<void> {
     }
   }
   removeSessionId();
+  clearAllDrafts();
 }
 
 /**

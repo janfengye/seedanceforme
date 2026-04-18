@@ -34,6 +34,7 @@ const TASK_COLUMNS = [
   'retry_count',
   'shot_id',
   'version_label',
+  'task_config',
 ];
 
 const TASK_UPDATE_FIELDS = new Set(TASK_COLUMNS);

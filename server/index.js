@@ -16,7 +16,7 @@ import { generateSeedanceVideo as generateSeedanceVideoCore } from './services/v
 import * as authService from './services/authService.js';
 import * as jimengSessionService from './services/jimengSessionService.js';
 import * as jimengCreditService from './services/jimengCreditService.js';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 
 // 初始化数据库
 initDatabase();
@@ -32,6 +32,7 @@ app.use(express.json());
 // M3+M4 路由
 app.use('/api', episodesRouter);
 app.use('/api', shotsRouter);
+app.use('/api', shotDraftsRouter);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -89,11 +90,19 @@ function consumeDownloadToken(token, userId = null) {
 }
 
 setInterval(cleanupExpiredDownloadTokens, DOWNLOAD_TOKEN_TTL_MS).unref();
+cleanExpiredDrafts();
+setInterval(cleanExpiredDrafts, 3600000).unref();
+// 账号保活：每6小时验证一次，启动30秒后首次执行
+setTimeout(keepAliveSessions, 30000);
+setInterval(keepAliveSessions, 6 * 3600 * 1000).unref();
 
 // 认证中间件（从 middleware/auth.js 导入）
 import { authenticate, requireAdmin } from './middleware/auth.js';
 import episodesRouter from './routes/episodes.js';
 import shotsRouter from './routes/shots.js';
+import shotDraftsRouter from './routes/shotDrafts.js';
+import { cleanExpiredDrafts } from './services/shotDraftService.js';
+import { keepAliveSessions } from './services/jimengSessionService.js';
 import { getFilenameForTask } from './services/filenameService.js';
 
 const FAKE_HEADERS = {
@@ -151,6 +160,31 @@ const VIDEO_RESOLUTION = {
 const tasks = new Map();
 let taskCounter = 0;
 const accountCursors = new Map(); // userId -> lastUsedIndex
+const accountInFlight = new Map(); // accountId -> { count, tasks: Set<taskId> }
+
+function markAccountBusy(accountId, taskId) {
+  if (!accountInFlight.has(accountId)) {
+    accountInFlight.set(accountId, { count: 0, tasks: new Set() });
+  }
+  const info = accountInFlight.get(accountId);
+  info.count++;
+  info.tasks.add(taskId);
+  console.log(`[account] 账号 ${accountId} 当前任务数: ${info.count}`);
+}
+
+function markAccountFree(accountId, taskId) {
+  const info = accountInFlight.get(accountId);
+  if (info) {
+    info.count = Math.max(0, info.count - 1);
+    info.tasks.delete(taskId);
+    console.log(`[account] 账号 ${accountId} 释放任务，剩余: ${info.count}`);
+    if (info.count === 0) accountInFlight.delete(accountId);
+  }
+}
+
+function getAccountLoad(accountId) {
+  return accountInFlight.get(accountId)?.count || 0;
+}
 
 function getMissingSessionErrorMessage() {
   return '未配置可用的 SessionID，请在设置页添加并启用账号';
@@ -185,21 +219,51 @@ function isRetryableSessionError(error) {
     'fetch failed',
     'econnrefused',
     'econnreset',
+    '高峰',
+    '任务',
+    '1310',
+    '1064',
+    '频率',
+    '频繁',
+    'rate',
+    '排队',
+    '限制',
+    '失败',
+    'fail',
+    'busy',
+    '稍后',
+    '重试',
+    '异常',
+    '4013',
+    'api 错误',
+    'api error',
   ].some((keyword) => message.includes(keyword));
 }
 
 function rotateAccounts(accounts, userId) {
   if (accounts.length <= 1) return accounts;
 
+  // 按忙碌程度排序：空闲优先，同等忙碌度按 round-robin 顺序
   const nextIndex = accountCursors.get(userId) || 0;
-  const selectedAccount = accounts[nextIndex];
-  const reservedNextIndex = (nextIndex + 1) % accounts.length;
-  accountCursors.set(userId, reservedNextIndex);
 
-  console.log(`[account] 轮询选择账号: ${selectedAccount.name || `账号${nextIndex + 1}`} (session: ${selectedAccount.sessionId.substring(0, 8)}..., ${nextIndex + 1}/${accounts.length})`);
-  console.log(`[account] 已预留下次轮询起点: ${accounts[reservedNextIndex].name || `账号${reservedNextIndex + 1}`} (${reservedNextIndex + 1}/${accounts.length})`);
+  // 先按 round-robin 排列
+  const rotated = [...accounts.slice(nextIndex), ...accounts.slice(0, nextIndex)];
 
-  return [...accounts.slice(nextIndex), ...accounts.slice(0, nextIndex)];
+  // 再按负载升序稳定排序（空闲的排前面）
+  rotated.sort((a, b) => getAccountLoad(a.id) - getAccountLoad(b.id));
+
+  const selected = rotated[0];
+  const selectedLoad = getAccountLoad(selected.id);
+
+  // 更新游标
+  const originalIndex = accounts.findIndex(a => a.id === selected.id);
+  accountCursors.set(userId, (originalIndex + 1) % accounts.length);
+
+  console.log(`[account] 智能选择账号: ${selected.name || '?'} (session: ${selected.sessionId.substring(0, 8)}..., 当前负载: ${selectedLoad})`);
+  const loadSummary = rotated.map(a => `${a.name || a.id}:${getAccountLoad(a.id)}`).join(', ');
+  console.log(`[account] 各账号负载: ${loadSummary}`);
+
+  return rotated;
 }
 
 function advanceAccountCursor(accounts, userId, account) {
@@ -220,13 +284,17 @@ function advanceAccountCursor(accounts, userId, account) {
 
 async function runWithSessionAccounts(accounts, runner, userId) {
   let lastError = null;
+  const trackingId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   for (let index = 0; index < accounts.length; index += 1) {
     const account = accounts[index];
+    markAccountBusy(account.id, trackingId);
     try {
       const result = await runner(account, index);
+      markAccountFree(account.id, trackingId);
       return { result, account };
     } catch (error) {
+      markAccountFree(account.id, trackingId);
       lastError = error;
       const remaining = accounts.length - index - 1;
       if (remaining > 0 && isRetryableSessionError(error)) {
@@ -923,6 +991,19 @@ app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', ma
     const files = req.files?.files || [];
     const audioFiles = req.files?.audioFiles || [];
 
+    // Parse pre-uploaded image URIs and indices
+    let preUploadedUris = [];
+    let preUploadedIndices = [];
+    try {
+      if (req.body.preUploadedUris) {
+        preUploadedUris = JSON.parse(req.body.preUploadedUris);
+        preUploadedIndices = req.body.preUploadedIndices ? JSON.parse(req.body.preUploadedIndices) : [];
+        console.log(`[生成任务] 收到 ${preUploadedUris.length} 张预上传图片, indices: ${preUploadedIndices}`);
+      }
+    } catch (e) {
+      console.warn('[生成任务] 解析 preUploadedUris 失败:', e.message);
+    }
+
     const resolvedSessions = jimengSessionService.resolveEffectiveSessions(req.user.id);
     if (!resolvedSessions.sessionId || resolvedSessions.accounts.length === 0) {
       return res.status(401).json({ error: getMissingSessionErrorMessage() });
@@ -960,6 +1041,34 @@ app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', ma
       });
       dbTaskId = createdTask.id;
       console.log(`[生成任务] 数据库记录已创建，db_task_id = ${dbTaskId}, project_id = ${defaultProject.id}`);
+
+      // Save task_config for regen-from-template feature
+      try {
+        const assetDir = path.join(__dirname, 'data', 'assets', String(dbTaskId));
+        mkdirSync(assetDir, { recursive: true });
+        const assetMeta = [];
+        files.forEach((f, i) => {
+          const fname = `img-${i}-${f.originalname}`;
+          writeFileSync(path.join(assetDir, fname), f.buffer);
+          assetMeta.push({ type: 'image', index: i, filename: fname, originalname: f.originalname, mimetype: f.mimetype });
+        });
+        audioFiles.forEach((f, i) => {
+          const fname = `aud-${i}-${f.originalname}`;
+          writeFileSync(path.join(assetDir, fname), f.buffer);
+          assetMeta.push({ type: 'audio', index: i, filename: fname, originalname: f.originalname, mimetype: f.mimetype });
+        });
+        const taskConfig = JSON.stringify({
+          prompt: prompt || '',
+          model: model || 'seedance-2.0',
+          ratio: ratio || '4:3',
+          duration: parseInt(duration) || 4,
+          shotId: shotId ? parseInt(shotId) : null,
+          assets: assetMeta,
+        });
+        taskService.updateTask(dbTaskId, { task_config: taskConfig });
+      } catch (cfgErr) {
+        console.error('[生成任务] 保存 task_config 失败:', cfgErr.message);
+      }
     } catch (dbError) {
       console.error('[生成任务] 创建数据库记录失败:', dbError.message);
     }
@@ -1003,6 +1112,8 @@ app.post('/api/generate-video', authenticate, upload.fields([{ name: 'files', ma
       duration: parseInt(duration) || 4,
       files,
       audioFiles,
+      preUploadedUris,
+      preUploadedIndices,
       sessionId: account.sessionId,
       model: model || 'seedance-2.0',
       onProgress: async (progress) => {
@@ -1204,6 +1315,36 @@ app.get('/api/video-proxy', async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: '视频代理失败' });
     }
+  }
+});
+
+
+// POST /api/upload-image - 预上传单张图片到 CDN
+app.post('/api/upload-image', authenticate, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '请上传一张图片' });
+    }
+
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ error: '仅支持图片文件' });
+    }
+
+    const resolvedSessions = jimengSessionService.resolveEffectiveSessions(req.user.id);
+    if (!resolvedSessions.sessionId || resolvedSessions.accounts.length === 0) {
+      return res.status(401).json({ error: getMissingSessionErrorMessage() });
+    }
+
+    const sessionId = resolvedSessions.sessionId;
+    console.log('[预上传] 开始上传图片到CDN:', req.file.originalname, '(' + (req.file.size / 1024).toFixed(1) + 'KB)');
+
+    const imageUri = await uploadImageBuffer(req.file.buffer, sessionId);
+    console.log('[预上传] 上传成功:', imageUri);
+
+    res.json({ imageUri });
+  } catch (error) {
+    console.error('[预上传] 失败:', error.message);
+    res.status(500).json({ error: '图片上传失败: ' + error.message });
   }
 });
 
@@ -1521,6 +1662,189 @@ app.delete('/api/tasks/assets/:assetId', (req, res) => {
     taskService.deleteTaskAsset(req.params.assetId);
     res.json({ success: true });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/tasks/:id/asset-file/:assetIndex - 下载任务素材文件（用于"以此为模板"功能）
+app.get('/api/tasks/:id/asset-file/:assetIndex', authenticate, (req, res) => {
+  try {
+    const task = taskService.getTaskById(req.params.id);
+    if (!task) return res.status(404).json({ error: '任务不存在' });
+    if (!task.task_config) return res.status(404).json({ error: '任务无配置信息' });
+
+    const config = JSON.parse(task.task_config);
+    const idx = parseInt(req.params.assetIndex);
+    const asset = config.assets?.[idx];
+    if (!asset) return res.status(404).json({ error: '素材不存在' });
+
+    const filePath = path.join(__dirname, 'data', 'assets', String(task.id), asset.filename);
+    if (!existsSync(filePath)) return res.status(404).json({ error: '素材文件不存在' });
+
+    res.set('Content-Type', asset.mimetype || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename="${encodeURIComponent(asset.originalname)}"`);
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/tasks/:id/config - 获取任务配置（用于"以此为模板"功能）
+app.get('/api/tasks/:id/config', authenticate, (req, res) => {
+  try {
+    const task = taskService.getTaskById(req.params.id);
+    if (!task) return res.status(404).json({ error: '任务不存在' });
+    if (!task.task_config) return res.status(404).json({ error: '任务无配置信息' });
+
+    res.json({ success: true, config: JSON.parse(task.task_config) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// GET /api/tasks/:id/remote-config - 从即梦CDN获取任务的原始素材和配置
+app.get('/api/tasks/:id/remote-config', authenticate, async (req, res) => {
+  try {
+    const task = taskService.getTaskById(req.params.id);
+    if (!task) return res.status(404).json({ error: '任务不存在' });
+
+    // Need item_id to query jimeng
+    if (!task.item_id && !task.history_id) {
+      return res.status(404).json({ error: '任务无即梦关联信息' });
+    }
+
+    const resolvedSession = jimengSessionService.resolveEffectiveSession(req.user.id);
+    if (!resolvedSession.sessionId) {
+      return res.status(400).json({ error: '无可用的即梦账号' });
+    }
+
+    // Resolve item_id if we only have history_id
+    let itemId = task.item_id ? String(task.item_id) : null;
+    if (!itemId && task.history_id) {
+      const map = await resolveItemIdsByHistoryIds(resolvedSession.sessionId, [String(task.history_id)]);
+      itemId = map.get(String(task.history_id)) || null;
+    }
+    if (!itemId) {
+      return res.status(404).json({ error: '无法解析即梦任务ID' });
+    }
+
+    // Fetch full item detail
+    const items = await fetchLocalItemsByItemIds(resolvedSession.sessionId, [itemId]);
+    if (!items || items.length === 0) {
+      return res.status(404).json({ error: '无法从即梦获取任务详情' });
+    }
+
+    const item = items[0];
+
+    // Extract assets from aigc_draft_resources
+    const draftResources = item.aigc_draft_resources || [];
+    const assets = draftResources.map((r, i) => {
+      const imageInfo = r.image_info || {};
+      const audioInfo = r.audio_info || {};
+      if (imageInfo.image_url) {
+        return {
+          type: 'image',
+          index: i,
+          cdnUrl: imageInfo.image_url,
+          uri: imageInfo.image_uri || r.key || '',
+          width: imageInfo.width || 0,
+          height: imageInfo.height || 0,
+        };
+      }
+      if (audioInfo.audio_url || audioInfo.url) {
+        return {
+          type: 'audio',
+          index: i,
+          cdnUrl: audioInfo.audio_url || audioInfo.url || '',
+          uri: audioInfo.audio_uri || r.key || '',
+          name: audioInfo.name || audioInfo.title || `audio_${i}`,
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    // Extract generation params from draft content
+    let prompt = task.prompt || '';
+    let model = '';
+    let ratio = '';
+    let duration = 0;
+
+    try {
+      const params = item.aigc_image_params?.text2video_params || {};
+      model = params.model_req_key || '';
+      ratio = params.video_aspect_ratio || '';
+
+      // Parse draft content for detailed params
+      const draftContent = item.aigc_draft?.content;
+      const parsed = typeof draftContent === 'string' ? JSON.parse(draftContent) : draftContent;
+      const comp = parsed?.component_list?.[0];
+      const videoInputs = comp?.abilities?.gen_video?.text_to_video_params?.video_gen_inputs?.[0];
+      if (videoInputs) {
+        if (videoInputs.prompt) prompt = videoInputs.prompt;
+        if (videoInputs.duration_ms) duration = Math.round(videoInputs.duration_ms / 1000);
+
+        // Extract material_list for more accurate asset info (includes audio)
+        const materialList = videoInputs.unified_edit_input?.material_list || [];
+        if (materialList.length > 0 && assets.length === 0) {
+          // Fallback: build assets from material_list
+          materialList.forEach((mat, idx) => {
+            if (mat.material_type === 'image' && mat.image_info?.image_uri) {
+              const uri = mat.image_info.image_uri;
+              // Find matching resource for CDN URL
+              const res = draftResources.find(r => r.key === uri || r.image_info?.image_uri === uri);
+              assets.push({
+                type: 'image',
+                index: idx,
+                cdnUrl: res?.image_info?.image_url || '',
+                uri: uri,
+                width: mat.image_info.width || 0,
+                height: mat.image_info.height || 0,
+              });
+            } else if (mat.material_type === 'audio') {
+              const audioUri = mat.audio_info?.audio_uri || mat.audio_info?.uri || '';
+              const res = draftResources.find(r => r.key === audioUri);
+              assets.push({
+                type: 'audio',
+                index: idx,
+                cdnUrl: res?.audio_info?.audio_url || res?.audio_info?.url || '',
+                uri: audioUri,
+                name: mat.audio_info?.name || mat.audio_info?.title || `audio_${idx}`,
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[remote-config] 解析即梦配置失败:', e.message);
+    }
+
+    // Map model_req_key to our model names
+    const modelMap = {
+      'dreamina_seedance_40_pro': 'seedance-2.0',
+      'dreamina_seedance_40_pro_vision': 'seedance-2.0-vip',
+      'dreamina_seedance_40': 'seedance-2.0-fast',
+      'dreamina_seedance_40_vision': 'seedance-2.0-fast-vip',
+    };
+
+    // Map aspect ratio format
+    const ratioMap = {
+      '9:16': '9:16', '16:9': '16:9', '4:3': '4:3', '3:4': '3:4', '1:1': '1:1', '21:9': '21:9',
+    };
+
+    res.json({
+      success: true,
+      data: {
+        prompt,
+        model: modelMap[model] || model || 'seedance-2.0-fast',
+        ratio: ratioMap[ratio] || ratio || '16:9',
+        duration: duration || 5,
+        assets,
+        shotId: task.shot_id || null,
+      },
+    });
+  } catch (error) {
+    console.error('[remote-config] 错误:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2260,6 +2584,34 @@ app.post('/api/settings/session-accounts/:id/refresh-credits', authenticate, req
 });
 
 
+// POST /api/jimeng/sign-all - 一键签到所有账号
+app.post('/api/jimeng/sign-all', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const results = await jimengCreditService.signInAllAccounts();
+    res.json({ success: true, data: { results } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/jimeng/sign-status - 获取签到状态
+app.get('/api/jimeng/sign-status', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const accounts = db.prepare('SELECT id, name, last_sign_at FROM jimeng_session_accounts WHERE is_enabled = 1').all();
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+    const statuses = accounts.map(a => ({
+      id: a.id,
+      name: a.name,
+      signedToday: a.last_sign_at ? a.last_sign_at.startsWith(today) : false,
+      lastSignAt: a.last_sign_at,
+    }));
+    res.json({ success: true, data: statuses });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // -------------------- 下载 API --------------------
 // GET /api/download/file?path=xxx - 下载文件
 app.get('/api/download/file', async (req, res) => {
@@ -2369,10 +2721,21 @@ app.get('/api/download/tasks/:id/file', authenticate, async (req, res) => {
 // 下载管理 API 路由
 // ============================================================
 
+// GET /api/download/creators - 获取有任务的生成者列表
+app.get("/api/download/creators", authenticate, (req, res) => {
+  try {
+    const db = getDatabase();
+    const creators = db.prepare("SELECT DISTINCT u.id, u.nickname, u.username FROM tasks t JOIN users u ON t.user_id = u.id WHERE t.task_kind = 'output' ORDER BY u.nickname").all();
+    res.json({ success: true, data: creators });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/download/tasks - 获取下载任务列表
 app.get('/api/download/tasks', authenticate, (req, res) => {
   try {
-    const { status = 'all', type = 'all', page = 1, pageSize = 20 } = req.query;
+    const { status = "all", type = "all", page = 1, pageSize = 20, projectId, source, creatorId, dateFrom, dateTo } = req.query;
     const isAdmin = req.user.role === 'admin' || req.user.role === 'super_admin';
     const result = videoDownloader.getDownloadTasks({
       status,
@@ -2381,6 +2744,11 @@ app.get('/api/download/tasks', authenticate, (req, res) => {
       pageSize: parseInt(pageSize),
       userId: req.user.id,
       isAdmin,
+      projectId: projectId ? parseInt(projectId) : null,
+      source: source || "all",
+      creatorId: creatorId || null,
+      dateFrom: dateFrom || null,
+      dateTo: dateTo || null,
     });
     res.json({ success: true, data: result });
   } catch (error) {
@@ -2400,9 +2768,9 @@ app.post('/api/download/refresh', authenticate, async (req, res) => {
       return res.status(400).json({ error: getMissingSessionErrorMessage() });
     }
 
-    // 非管理员用户只能刷新自己的任务
-    const userWhereClause = isAdmin ? '' : 'AND t.user_id = ?';
-    const userParams = isAdmin ? [] : [req.user.id];
+    // 团队共享：刷新所有用户的任务
+    const userWhereClause = '';
+    const userParams = [];
 
     const tasks = db.prepare(`
       SELECT t.id, t.history_id, t.item_id, t.status, t.video_url, t.created_at
@@ -2489,7 +2857,6 @@ app.post('/api/download/refresh', authenticate, async (req, res) => {
 app.post('/api/download/sync-from-jimeng', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    // 使用用户的即梦 SessionID（而非登录 session）
     const resolvedSession = jimengSessionService.resolveEffectiveSession(req.user.id);
     const sessionId = resolvedSession.sessionId;
 
@@ -2497,226 +2864,190 @@ app.post('/api/download/sync-from-jimeng', authenticate, async (req, res) => {
       return res.status(400).json({ error: getMissingSessionErrorMessage() });
     }
 
-    const localTasks = db.prepare(`
-      SELECT id, history_id, video_url FROM tasks WHERE history_id IS NOT NULL
-    `).all();
-    const localTaskMap = new Map(localTasks.map((task) => [task.history_id, task]));
-    const defaultProject = ensureDefaultProjectForUser(req.user.id);
+    const JIMENG_PROXY_URL = 'http://150.158.91.71:19999/jimeng-proxy';
 
-    const pickFirstArray = (...values) =>
-      values.find((value) => Array.isArray(value) && value.length >= 0) || [];
+    // Helper: call jimeng API via tx-cloud proxy
+    async function proxyCall(apiPath, apiBody) {
+      const resp = await fetch(JIMENG_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, apiPath, apiBody }),
+        signal: AbortSignal.timeout(30000),
+      });
+      return resp.json();
+    }
 
-    const extractItemId = (item) =>
-      item?.item_id ||
-      item?.local_item_id ||
-      item?.common_attr?.id ||
-      item?.id ||
-      null;
+    // Step 1: Get all history records via proxy
+    const allRecords = [];
+    let offset = Date.now();
+    let hasMore = true;
+    const seenHistoryIds = new Set();
 
-    const extractHistoryId = (item) =>
-      item?.history_id ||
-      item?.history_record_id ||
-      item?.common_attr?.history_id ||
-      item?.item_base?.history_id ||
-      null;
-
-    const extractPrompt = (item, fallbackId) =>
-      item?.prompt ||
-      item?.desc ||
-      item?.description ||
-      item?.common_attr?.prompt ||
-      item?.common_attr?.desc ||
-      `即梦作品 ${fallbackId}`;
-
-    const extractVideoUrl = (item) =>
-      item?.video?.transcoded_video?.origin?.video_url ||
-      item?.video?.download_url ||
-      item?.video?.play_url ||
-      item?.video?.url ||
-      item?.video?.play_addr?.url_list?.[0] ||
-      item?.item_video?.url ||
-      null;
-
-    const chunkArray = (items, size) => {
-      const chunks = [];
-      for (let i = 0; i < items.length; i += size) {
-        chunks.push(items.slice(i, i + size));
+    while (hasMore) {
+      const proxyData = await proxyCall('/mweb/v1/get_history', { offset, count: 20, direction: 1 });
+      if (String(proxyData.ret) !== '0') {
+        if (allRecords.length === 0) throw new Error(proxyData.errmsg || '获取即梦历史失败');
+        break;
       }
+      const records = proxyData.data?.records_list || [];
+      let newCount = 0;
+      for (const r of records) {
+        const hid = r.history_record_id || r.historyRecordId;
+        if (hid && !seenHistoryIds.has(hid)) {
+          seenHistoryIds.add(hid);
+          allRecords.push(r);
+          newCount++;
+        }
+      }
+      hasMore = proxyData.data?.has_more || false;
+      if (records.length > 0) {
+        const last = records[records.length - 1];
+        const lastTime = last.created_time || last.createdTime;
+        if (lastTime) {
+          const newOffset = Math.floor(Number(lastTime) * 1000);
+          if (newOffset >= offset) break;
+          offset = newOffset;
+        } else { hasMore = false; }
+      }
+      if (newCount === 0) break;
+      console.log(`[sync] 已获取 ${allRecords.length} 条记录...`);
+    }
+    console.log(`[sync] 从即梦获取 ${allRecords.length} 条历史记录`);
+
+    if (allRecords.length === 0) {
+      return res.json({ success: true, data: { synced: 0, total: 0, message: '即梦平台暂无可同步作品' } });
+    }
+
+    // Step 2: For each record, get item_id via get_history_by_ids (proxy)
+    const historyIds = [...seenHistoryIds];
+    const itemIdByHistoryId = new Map();
+
+    const chunkArray = (arr, size) => {
+      const chunks = [];
+      for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
       return chunks;
     };
 
-    const assetResult = await jimengRequest(
-      'post',
-      '/mweb/v1/get_asset_list',
-      sessionId,
-      { data: {} }
-    );
-
-    const assetItems = pickFirstArray(
-      assetResult?.asset_list,
-      assetResult?.item_list,
-      assetResult?.list,
-      assetResult?.data?.asset_list,
-      assetResult?.data?.item_list,
-      assetResult?.data?.list
-    );
-
-    if (assetItems.length === 0) {
-      return res.json({
-        success: true,
-        data: { synced: 0, total: 0, message: '即梦平台暂无可同步作品' },
-      });
-    }
-
-    const normalizedAssets = [];
-    const seenKeys = new Set();
-
-    for (const item of assetItems) {
-      const itemId = extractItemId(item);
-      const historyId = extractHistoryId(item);
-      const uniqueKey = historyId || itemId;
-
-      if (!uniqueKey || seenKeys.has(uniqueKey)) {
-        continue;
-      }
-
-      seenKeys.add(uniqueKey);
-      normalizedAssets.push({
-        itemId: itemId ? String(itemId) : null,
-        historyId: historyId ? String(historyId) : null,
-        prompt: extractPrompt(item, uniqueKey),
-        videoUrl: extractVideoUrl(item),
-      });
-    }
-
-    const detailByItemId = new Map();
-    const detailByHistoryId = new Map();
-    const itemIds = normalizedAssets
-      .map((item) => item.itemId)
-      .filter(Boolean);
-
-    for (const chunk of chunkArray(itemIds, 20)) {
-      const detailResult = await jimengRequest(
-        'post',
-        '/mweb/v1/get_local_item_list',
-        sessionId,
-        {
-          data: {
-            item_id_list: chunk,
-            pack_item_opt: {
-              scene: 1,
-              need_data_integrity: true,
-            },
-            is_for_video_download: true,
-          },
+    for (const chunk of chunkArray(historyIds, 20)) {
+      try {
+        const resolveData = await proxyCall('/mweb/v1/get_history_by_ids', { history_ids: chunk });
+        if (String(resolveData.ret) === '0') {
+          const data = resolveData.data || resolveData;
+          const records = [
+            ...(data.history_list || data.list || []),
+            ...chunk.map(hid => data[hid]).filter(Boolean),
+          ];
+          for (const record of records) {
+            const hid = String(record.history_id || record.history_record_id || record.common_attr?.history_id || '');
+            const items = record.item_list || record.items || [];
+            const item = items[0];
+            const iid = item?.item_id || item?.local_item_id || item?.common_attr?.id || item?.id;
+            if (hid && iid) itemIdByHistoryId.set(hid, String(iid));
+          }
         }
-      );
-
-      const detailItems = pickFirstArray(
-        detailResult?.item_list,
-        detailResult?.local_item_list,
-        detailResult?.list,
-        detailResult?.data?.item_list,
-        detailResult?.data?.local_item_list,
-        detailResult?.data?.list
-      );
-
-      for (const item of detailItems) {
-        const itemId = extractItemId(item);
-        const historyId = extractHistoryId(item);
-        const videoUrl = extractVideoUrl(item);
-
-        if (itemId) {
-          detailByItemId.set(String(itemId), {
-            historyId: historyId ? String(historyId) : null,
-            videoUrl,
-          });
-        }
-
-        if (historyId) {
-          detailByHistoryId.set(String(historyId), {
-            itemId: itemId ? String(itemId) : null,
-            videoUrl,
-          });
-        }
+      } catch (e) {
+        console.warn('[sync] 解析 historyId->itemId 失败:', e.message);
       }
     }
+    console.log(`[sync] 解析出 ${itemIdByHistoryId.size} 个 itemId 映射`);
+
+    // Step 3: Fetch video details via get_local_item_list (proxy)
+    const allItemIds = [...new Set(itemIdByHistoryId.values())];
+    const videoUrlByItemId = new Map();
+
+    for (const chunk of chunkArray(allItemIds, 20)) {
+      try {
+        const detailData = await proxyCall('/mweb/v1/get_local_item_list', {
+          item_id_list: chunk,
+          pack_item_opt: { scene: 1, need_data_integrity: true },
+          is_for_video_download: true,
+        });
+        if (String(detailData.ret) === '0' && detailData.data) {
+          const items = detailData.data.item_list || detailData.data.local_item_list || [];
+          for (const it of items) {
+            const iid = it.common_attr?.id || it.item_id || it.local_item_id;
+            const videoUrl = it.video?.transcoded_video?.origin?.video_url
+              || it.video?.download_url || it.video?.play_url || null;
+            if (iid && videoUrl) videoUrlByItemId.set(String(iid), videoUrl);
+          }
+          console.log(`[sync] 获取视频详情: ${chunk.length} items, ${[...items].filter(it => {
+            const iid = it.common_attr?.id || it.item_id;
+            return iid && videoUrlByItemId.has(String(iid));
+          }).length} 有视频`);
+        }
+      } catch (e) {
+        console.warn('[sync] 获取视频详情失败:', e.message);
+      }
+    }
+    console.log(`[sync] 共 ${videoUrlByItemId.size} 个有视频URL`);
+
+    // Step 4: Create/update tasks in DB
+    const localTasks = db.prepare('SELECT id, history_id, video_url FROM tasks WHERE history_id IS NOT NULL').all();
+    const localTaskMap = new Map(localTasks.map(t => [t.history_id, t]));
+    const defaultProject = ensureDefaultProjectForUser(req.user.id);
 
     let syncedCount = 0;
     const syncedItems = [];
 
-    for (const item of normalizedAssets) {
-      const detail =
-        (item.itemId && detailByItemId.get(item.itemId)) ||
-        (item.historyId && detailByHistoryId.get(item.historyId)) ||
-        null;
+    for (const record of allRecords) {
+      const historyId = String(record.history_record_id || record.historyRecordId || '');
+      if (!historyId) continue;
 
-      const historyId = detail?.historyId || item.historyId;
-      const videoUrl = detail?.videoUrl || item.videoUrl;
+      const itemId = itemIdByHistoryId.get(historyId);
+      const videoUrl = itemId ? videoUrlByItemId.get(itemId) : null;
+      const prompt = record.prompt || record.desc || record.description || `即梦作品 ${historyId}`;
 
-      if (!historyId || !videoUrl) {
-        continue;
-      }
+      // Skip records without video (image-only generations)
+      // But still create task if it's a video type (generate_type === 1)
+      // generate_type: 1=文生图, 7=视频生成, 12=图生图
+      const isVideoType = record.generate_type === 7;
 
       const existingTask = localTaskMap.get(historyId);
-
       if (existingTask) {
-        if (!existingTask.video_url) {
-          db.prepare(`
-            UPDATE tasks
-            SET video_url = ?, status = 'done', completed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `).run(videoUrl, existingTask.id);
+        if (!existingTask.video_url && videoUrl) {
+          db.prepare('UPDATE tasks SET video_url = ?, item_id = ?, status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(videoUrl, itemId || null, 'done', existingTask.id);
           syncedCount++;
-          syncedItems.push({
-            taskId: existingTask.id,
-            historyId,
-            action: 'updated',
-          });
+          syncedItems.push({ taskId: existingTask.id, historyId, action: 'updated' });
         }
         continue;
       }
 
+      // Create new task — include both video and non-video types
+      if (!isVideoType && !videoUrl) continue;
+
       const createdTask = taskService.createTask({
         projectId: defaultProject.id,
         userId: req.user.id,
-        prompt: item.prompt,
+        prompt,
         taskKind: 'output',
-        status: 'done',
-        historyId: historyId,
-        itemId: item.itemId,
-        videoUrl,
-        downloadStatus: 'pending',
-        completedAt: new Date().toISOString(),
-      });
-
-      localTaskMap.set(historyId, {
-        id: createdTask.id,
-        history_id: historyId,
-        video_url: videoUrl,
-      });
-
-      syncedCount++;
-      syncedItems.push({
-        taskId: createdTask.id,
+        status: videoUrl ? 'done' : 'generating',
         historyId,
-        action: 'created',
-        prompt: item.prompt,
+        itemId: itemId || null,
+        videoUrl: videoUrl || null,
+        downloadStatus: videoUrl ? 'pending' : null,
+        completedAt: videoUrl ? new Date().toISOString() : null,
       });
+
+      localTaskMap.set(historyId, { id: createdTask.id, history_id: historyId, video_url: videoUrl });
+      syncedCount++;
+      syncedItems.push({ taskId: createdTask.id, historyId, action: 'created', prompt: prompt.substring(0, 50) });
     }
 
     res.json({
       success: true,
       data: {
         synced: syncedCount,
-        total: normalizedAssets.length,
+        total: allRecords.length,
         items: syncedItems.slice(0, 20),
       },
     });
   } catch (error) {
+    console.error('[sync] 错误:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // POST /api/download/tasks/:id - 下载单个任务视频
 app.post('/api/download/tasks/:id', async (req, res) => {
@@ -3513,27 +3844,12 @@ app.put('/api/user/profile', authenticate, (req, res) => {
   }
 });
 
+
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', mode: 'direct-jimeng-api' });
 });
 
-// 生产模式: 提供前端静态文件
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '../dist');
-  app.use(express.static(distPath));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
-
-// 优雅关闭: 清理浏览器进程
-process.on('SIGTERM', () => {
-  console.log('[server] 收到 SIGTERM，正在关闭...');
-  browserService.close().finally(() => {
-    closeDatabase();
-    process.exit(0);
-  });
-});
 process.on('SIGINT', () => {
   console.log('[server] 收到 SIGINT，正在关闭...');
   browserService.close().finally(() => {
@@ -3541,6 +3857,45 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+// 自动签到 - 每天北京时间 00:05
+function scheduleAutoSignIn() {
+  const getNextRunMs = () => {
+    const now = new Date();
+    const beijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+    const target = new Date(beijing);
+    target.setHours(0, 5, 0, 0);
+    if (beijing >= target) target.setDate(target.getDate() + 1);
+    return target.getTime() - beijing.getTime();
+  };
+
+  const run = async () => {
+    try {
+      console.log('[auto-sign] 开始自动签到...');
+      const results = await jimengCreditService.signInAllAccounts();
+      const ok = results.filter(r => r.success).length;
+      console.log('[auto-sign] 完成: ' + ok + '/' + results.length + ' 成功');
+    } catch (e) {
+      console.error('[auto-sign] 失败:', e.message);
+    }
+    setTimeout(run, getNextRunMs());
+  };
+
+  setTimeout(run, getNextRunMs());
+  console.log('[auto-sign] 下次签到: ' + Math.round(getNextRunMs() / 60000) + ' 分钟后');
+}
+
+scheduleAutoSignIn();
+
+// 生产模式: 提供前端静态文件
+if (process.env.NODE_ENV === "production") {
+  const distPath = path.join(__dirname, "../dist");
+  app.use(express.static(distPath));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+}
+
 
 app.listen(PORT, () => {
   console.log(`\n🚀 服务器已启动: http://localhost:${PORT}`);

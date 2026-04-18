@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import * as projectService from '../services/projectService';
 import * as taskService from '../services/taskService';
@@ -84,6 +85,7 @@ export default function BatchManagementPage() {
     deleteTaskAction,
   } = useApp();
   const { projects, tasks } = state;
+  const navigate = useNavigate();
 
   const [localState, setLocalState] = useState<BatchManagementState>({
     selectedProjectId: null,
@@ -619,12 +621,13 @@ export default function BatchManagementPage() {
           <h2 className="text-lg font-bold">项目列表</h2>
           <button
             onClick={() => setLocalState((prev) => ({ ...prev, isCreatingProject: true }))}
-            className="p-1.5 bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors text-xs font-medium"
             title="创建项目"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
+            新建
           </button>
         </div>
 
@@ -642,8 +645,21 @@ export default function BatchManagementPage() {
                 }`}
                 onClick={() => handleSelectProject(project)}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm truncate">{project.name}</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-medium text-sm truncate flex-1">{project.name}</span>
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      navigate(`/projects/${project.id}`);
+                    }}
+                    className="flex h-7 items-center justify-center rounded-md px-1.5 text-gray-500 hover:bg-blue-500/10 hover:text-blue-400 transition-colors"
+                    title="管理集/镜头"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -669,7 +685,17 @@ export default function BatchManagementPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="p-4 border-b border-gray-800 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="text-lg font-bold">{selectedProject ? selectedProject.name : '请选择项目'}</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold">{selectedProject ? selectedProject.name : '请选择项目'}</h2>
+              {selectedProject && (
+                <button
+                  onClick={() => navigate(`/projects/${selectedProject.id}`)}
+                  className="px-2.5 py-1 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded text-xs font-medium transition-colors"
+                >
+                  管理集/镜头
+                </button>
+              )}
+            </div>
             {selectedProject && (
               <p className="mt-1 text-xs text-gray-500">
                 已配置 {configuredDraftTasks.length} 行，可继续补齐到 {Math.max(DEFAULT_DRAFT_ROWS, draftTasks.length)} 行。

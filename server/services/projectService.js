@@ -17,7 +17,9 @@ export function getAllProjects(userId = null, isAdmin = false) {
     SELECT
       p.*,
       (SELECT COUNT(*) FROM tasks WHERE project_id = p.id) as task_count,
-      (SELECT COUNT(*) FROM tasks WHERE project_id = p.id AND status = 'done') as completed_count
+      (SELECT COUNT(*) FROM tasks WHERE project_id = p.id AND status = 'done') as completed_count,
+      (SELECT COUNT(*) FROM episodes WHERE project_id = p.id) as episode_count,
+      (SELECT COUNT(*) FROM shots s JOIN episodes e ON s.episode_id = e.id WHERE e.project_id = p.id AND s.status = 'active') as shot_count
     FROM projects p
   `;
 
@@ -41,7 +43,9 @@ export function getProjectById(id, userId = null, isAdmin = false) {
     SELECT
       p.*,
       (SELECT COUNT(*) FROM tasks WHERE project_id = p.id) as task_count,
-      (SELECT COUNT(*) FROM tasks WHERE project_id = p.id AND status = 'done') as completed_count
+      (SELECT COUNT(*) FROM tasks WHERE project_id = p.id AND status = 'done') as completed_count,
+      (SELECT COUNT(*) FROM episodes WHERE project_id = p.id) as episode_count,
+      (SELECT COUNT(*) FROM shots s JOIN episodes e ON s.episode_id = e.id WHERE e.project_id = p.id AND s.status = 'active') as shot_count
     FROM projects p
     WHERE p.id = ?
   `;

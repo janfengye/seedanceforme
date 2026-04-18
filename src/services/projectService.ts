@@ -239,6 +239,117 @@ export async function deleteShot(id: number): Promise<void> {
   if (!result.success) throw new Error(result.error || '删除镜头失败');
 }
 
+export interface ShotDetail extends Shot {
+  episode_number?: number;
+  project_id?: number;
+  project_code?: string;
+}
+
+export async function getShot(id: number): Promise<ShotDetail> {
+  const response = await fetch(`${API_BASE}/shots/${id}`, {
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse<ShotDetail> = await response.json();
+  if (!result.success) throw new Error(result.error || '获取镜头详情失败');
+  return result.data!;
+}
+
+// ============================================================
+// Shot Drafts API
+// ============================================================
+
+export interface ShotDraftData {
+  id: number;
+  shot_id: number;
+  user_id: number;
+  prompt: string;
+  tiptap_json: string | null;
+  model: string;
+  ratio: string;
+  duration: string;
+  reference_mode: string;
+  files: ShotDraftFileData[];
+}
+
+export interface ShotDraftFileData {
+  id: string;
+  draft_id: number;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  file_type: string;
+  disk_path: string;
+}
+
+export async function getShotDraft(shotId: number): Promise<ShotDraftData | null> {
+  const response = await fetch(`${API_BASE}/shots/${shotId}/draft`, {
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse<ShotDraftData | null> = await response.json();
+  if (!result.success) throw new Error(result.error || '获取草稿失败');
+  return result.data ?? null;
+}
+
+export async function saveShotDraft(shotId: number, data: {
+  prompt: string;
+  tiptapJson: any;
+  model: string;
+  ratio: string;
+  duration: string;
+  referenceMode: string;
+}): Promise<ShotDraftData> {
+  const response = await fetch(`${API_BASE}/shots/${shotId}/draft`, {
+    method: 'PUT',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(data),
+  });
+  const result: ApiResponse<ShotDraftData> = await response.json();
+  if (!result.success) throw new Error(result.error || '保存草稿失败');
+  return result.data!;
+}
+
+export async function deleteShotDraft(shotId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/shots/${shotId}/draft`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse = await response.json();
+  if (!result.success) throw new Error(result.error || '删除草稿失败');
+}
+
+export async function uploadShotDraftFile(shotId: number, fileId: string, file: File, fileType: string): Promise<ShotDraftFileData> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('fileId', fileId);
+  formData.append('fileType', fileType);
+
+  const response = await fetch(`${API_BASE}/shots/${shotId}/draft/files`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: formData,
+  });
+  const result: ApiResponse<ShotDraftFileData> = await response.json();
+  if (!result.success) throw new Error(result.error || '上传草稿文件失败');
+  return result.data!;
+}
+
+export async function downloadShotDraftFile(fileId: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE}/shot-draft-files/${fileId}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('下载草稿文件失败');
+  return response.blob();
+}
+
+export async function deleteShotDraftFile(fileId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/shot-draft-files/${fileId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse = await response.json();
+  if (!result.success) throw new Error(result.error || '删除草稿文件失败');
+}
+
 export default {
   getProjects,
   getProject,
@@ -256,4 +367,11 @@ export default {
   createShot,
   updateShot,
   deleteShot,
+  getShot,
+  getShotDraft,
+  saveShotDraft,
+  deleteShotDraft,
+  uploadShotDraftFile,
+  downloadShotDraftFile,
+  deleteShotDraftFile,
 };

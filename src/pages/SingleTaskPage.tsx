@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type {
   AspectRatio,
   Duration,
@@ -10,19 +10,22 @@ import type {
 } from '../types/index';
 import { RATIO_OPTIONS, DURATION_OPTIONS, REFERENCE_MODES, MODEL_OPTIONS } from '../types/index';
 import { generateVideo } from '../services/videoService';
-import { getProjects } from '../services/projectService';
+import { getProjects, getShot } from '../services/projectService';
 import ShotSelector from '../components/ShotSelector';
 import type { Project, Shot } from '../types/index';
 import VideoPlayer from '../components/VideoPlayer';
+import { PromptEditor } from '../components/PromptEditor';
 import { GearIcon, PlusIcon, CloseIcon, SparkleIcon } from '../components/Icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useDraftPersistence } from '../hooks/useDraftPersistence';
+import { loadTaskTemplate } from '../services/taskTemplateService';
 
 let nextId = 0;
 
 export default function SingleTaskPage() {
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [audioFiles, setAudioFiles] = useState<UploadedAudio[]>([]);
-  const [prompt, setPrompt] = useState('');
+  const [serializedPrompt, setSerializedPrompt] = useState('');
   const [model, setModel] = useState<ModelId>('seedance-2.0-fast');
   const [ratio, setRatio] = useState<AspectRatio>('16:9');
   const [duration, setDuration] = useState<Duration>(5);
@@ -35,14 +38,92 @@ export default function SingleTaskPage() {
   const maxImages = 9;
   const maxAudios = 3;
   const navigate = useNavigate();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [showAtMenu, setShowAtMenu] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedShot, setSelectedShot] = useState<Shot | null>(null);
   const [shotMeta, setShotMeta] = useState<{ projectCode?: string; episodeNumber?: number; shotNumber?: number } | null>(null);
   const [showShotSelector, setShowShotSelector] = useState(false);
-  const [atCursorPos, setAtCursorPos] = useState(0);
-  const [atSelectedIndex, setAtSelectedIndex] = useState(0);
+  const promptEditorRef = useRef<any>(null);
+  const { saveDraft, loadDraft, clearDraft } = useDraftPersistence();
+  const draftLoaded = useRef(false);
+  const [searchParams] = useSearchParams();
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateLoadingMsg, setTemplateLoadingMsg] = useState('');
+  const fromTaskId = searchParams.get('from_task');
+  const shotIdParam = searchParams.get('shotId');
+
+  // Load from template or draft on mount
+  useEffect(() => {
+    if (draftLoaded.current) return;
+    draftLoaded.current = true;
+
+    if (fromTaskId) {
+      // Load from task template with loading indicator
+      setTemplateLoading(true);
+      setTemplateLoadingMsg('正在加载任务配置...');
+      loadTaskTemplate(parseInt(fromTaskId), (msg: string) => setTemplateLoadingMsg(msg)).then(async (template) => {
+        if (!template) { setTemplateLoading(false); return; }
+        setImages(template.images);
+        setAudioFiles(template.audioFiles);
+        setModel(template.model);
+        setRatio(template.ratio);
+        setDuration(template.duration);
+        if (template.prompt) {
+          setTimeout(() => {
+            promptEditorRef.current?.editor?.commands.setContent(`<p>${template.prompt}</p>`);
+          }, 100);
+        }
+        // Restore shot association if template has shotId
+        if (template.shotId) {
+          try {
+            const shotDetail = await getShot(template.shotId);
+            if (shotDetail) {
+              setSelectedShot(shotDetail);
+              setShotMeta({
+                projectCode: (shotDetail as any).project_code,
+                episodeNumber: (shotDetail as any).episode_number,
+                shotNumber: shotDetail.shot_number,
+              });
+              setShowShotSelector(true);
+            }
+          } catch (e) {
+            console.warn('Failed to restore shot association:', e);
+          }
+        }
+        setTemplateLoading(false);
+      }).catch(() => setTemplateLoading(false));
+    } else {
+      // Load from draft
+      loadDraft().then((draft) => {
+        if (!draft) return;
+        setImages(draft.images);
+        setAudioFiles(draft.audioFiles);
+        setModel(draft.model);
+        setRatio(draft.ratio);
+        setDuration(draft.duration);
+        setReferenceMode(draft.referenceMode);
+        if (draft.tiptapJson) {
+          setTimeout(() => {
+            promptEditorRef.current?.editor?.commands.setContent(draft.tiptapJson);
+          }, 100);
+        }
+      });
+    }
+  }, []);
+
+  // Auto-save draft on state changes
+  useEffect(() => {
+    if (!draftLoaded.current) return;
+    saveDraft({
+      editorJson: promptEditorRef.current?.editor?.getJSON() || null,
+      model,
+      ratio,
+      duration,
+      referenceMode,
+      images,
+      audioFiles,
+    });
+  }, [serializedPrompt, model, ratio, duration, referenceMode, images, audioFiles, saveDraft]);
 
   const addFiles = useCallback(
     (fileList: FileList | null) => {
@@ -117,65 +198,52 @@ export default function SingleTaskPage() {
     getProjects().then(setProjects).catch(() => {});
   });
 
+  // 从 shotId 查询参数自动关联镜头
+  useEffect(() => {
+    if (!shotIdParam) return;
+    getShot(parseInt(shotIdParam)).then((shotDetail) => {
+      setSelectedShot(shotDetail);
+      setShotMeta({
+        projectCode: shotDetail.project_code,
+        episodeNumber: shotDetail.episode_number,
+        shotNumber: shotDetail.shot_number,
+      });
+      setShowShotSelector(true);
+      // 如果镜头有预设提示词且当前提示词为空，填充
+      if (shotDetail.prompt && !serializedPrompt.trim()) {
+        if (promptEditorRef.current?.editor) {
+          promptEditorRef.current.editor.commands.setContent('<p>' + shotDetail.prompt + '</p>');
+        }
+      }
+      // 如果镜头有推荐模型，设置模型
+      if (shotDetail.preferred_model) {
+        const modelMatch = MODEL_OPTIONS.find(m => m.value === shotDetail.preferred_model);
+        if (modelMatch) setModel(modelMatch.value);
+      }
+    }).catch((e) => {
+      console.error('加载镜头信息失败:', e);
+    });
+  }, [shotIdParam]);
+
   const handleShotSelect = useCallback((shot: Shot | null, meta?: { projectCode?: string; episodeNumber?: number; shotNumber?: number }) => {
     setSelectedShot(shot);
     setShotMeta(meta || null);
     // 如果镜头有预设提示词且当前提示词为空，提示填充
-    if (shot?.prompt && !prompt.trim()) {
-      setPrompt(shot.prompt);
+    if (shot?.prompt && !serializedPrompt.trim()) {
+      // Set content in Tiptap editor
+      if (promptEditorRef.current?.editor) {
+        promptEditorRef.current.editor.commands.setContent(`<p>${shot.prompt}</p>`);
+      }
     }
     // 如果镜头有推荐模型，预选
     if (shot?.preferred_model) {
       const modelValue = shot.preferred_model as any;
       setModel(modelValue);
     }
-  }, [prompt]);
-
-  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    const cursorPos = e.target.selectionStart || 0;
-    setPrompt(value);
-
-    // Check if user just typed '@'
-    if ((images.length > 0 || audioFiles.length > 0) && cursorPos > 0 && value[cursorPos - 1] === '@') {
-      setAtCursorPos(cursorPos);
-      setAtSelectedIndex(0);
-      setShowAtMenu(true);
-    } else {
-      setShowAtMenu(false);
-    }
-  }, [images.length, audioFiles.length]);
-
-  const atMenuItems = [...images.map((img) => ({ type: 'image' as const, index: img.index, label: `@${img.index}`, sublabel: `参考图 ${img.index}`, id: img.id, previewUrl: img.previewUrl })), ...audioFiles.map((aud) => ({ type: 'audio' as const, index: aud.index, label: `@Audio${aud.index}`, sublabel: aud.name, id: aud.id }))];
-
-  const insertAtReferenceItem = useCallback((item: typeof atMenuItems[0]) => {
-    const before = prompt.slice(0, atCursorPos);
-    const after = prompt.slice(atCursorPos);
-    const ref = item.type === 'audio' ? `Audio${item.index}` : String(item.index);
-    setPrompt(before + ref + ' ' + after);
-    setShowAtMenu(false);
-    setTimeout(() => textareaRef.current?.focus(), 0);
-  }, [prompt, atCursorPos]);
-
-  const handleAtMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!showAtMenu || atMenuItems.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setAtSelectedIndex((prev) => (prev + 1) % atMenuItems.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setAtSelectedIndex((prev) => (prev - 1 + atMenuItems.length) % atMenuItems.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      insertAtReferenceItem(atMenuItems[atSelectedIndex]);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setShowAtMenu(false);
-    }
-  }, [showAtMenu, atMenuItems, atSelectedIndex, insertAtReferenceItem]);
+  }, [serializedPrompt]);
 
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() && images.length === 0) return;
+    if (!serializedPrompt.trim() && images.length === 0) return;
     if (generation.status === 'generating') return;
 
     setGeneration({
@@ -186,7 +254,7 @@ export default function SingleTaskPage() {
     try {
       const result = await generateVideo(
         {
-          prompt,
+          prompt: serializedPrompt,
           model,
           ratio,
           duration,
@@ -201,6 +269,7 @@ export default function SingleTaskPage() {
 
       if (result.data && result.data.length > 0 && result.data[0].url) {
         setGeneration({ status: 'success', result });
+        clearDraft();
       } else {
         setGeneration({
           status: 'error',
@@ -213,13 +282,15 @@ export default function SingleTaskPage() {
         error: error instanceof Error ? error.message : '未知错误',
       });
     }
-  }, [prompt, images, audioFiles, model, ratio, duration, generation.status]);
+  }, [serializedPrompt, images, audioFiles, model, ratio, duration, generation.status, selectedShot]);
 
   const handleReset = () => {
-    setPrompt('');
+    setEditorKey((k) => k + 1);
+    setSerializedPrompt('');
     clearAllImages();
     setAudioFiles([]);
     setGeneration({ status: 'idle' });
+    clearDraft();
   };
 
   const videoUrl =
@@ -233,10 +304,31 @@ export default function SingleTaskPage() {
       : undefined;
 
   const isGenerating = generation.status === 'generating';
-  const canGenerate = (prompt.trim() || images.length > 0) && !isGenerating;
+  const canGenerate = (serializedPrompt.trim() || images.length > 0) && !isGenerating;
 
   return (
-    <div className="h-screen flex flex-col md:flex-row overflow-hidden bg-[#0f111a] text-white">
+    <div className="h-screen flex flex-col md:flex-row overflow-hidden bg-[#0f111a] text-white relative">
+      {/* Template loading overlay */}
+      {templateLoading && (
+        <div className="absolute inset-0 z-50 bg-[#0f111a]/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-[#1c1f2e] border border-purple-500/30 rounded-2xl p-8 max-w-sm w-full mx-4 shadow-2xl shadow-purple-900/20">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-4 border-purple-500/20"></div>
+                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-purple-500 animate-spin"></div>
+                <div className="absolute inset-2 rounded-full border-4 border-transparent border-b-indigo-400 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+              </div>
+              <div className="text-center">
+                <h3 className="text-white font-semibold text-lg mb-1">正在回传素材</h3>
+                <p className="text-gray-400 text-sm">{templateLoadingMsg}</p>
+              </div>
+              <div className="w-full bg-gray-700/50 rounded-full h-1.5 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full animate-loading-bar"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Mobile Header */}
       <div className="md:hidden sticky top-0 z-40 bg-[#0f111a]/95 backdrop-blur-sm px-4 py-3 flex items-center justify-between border-b border-gray-800">
         <h1 className="text-lg font-bold">{MODEL_OPTIONS.find(m => m.value === model)?.label || 'Seedance 2.0'}</h1>
@@ -293,7 +385,7 @@ export default function SingleTaskPage() {
                       className="w-full h-full object-cover rounded-xl border border-gray-700"
                     />
                     <span className="absolute bottom-0 left-0 bg-black/70 text-[10px] text-purple-400 px-1.5 py-0.5 rounded-br-xl rounded-tl-xl font-medium">
-                      @{img.index}
+                      @图{img.index}
                     </span>
                     <button
                       onClick={() => removeImage(img.id)}
@@ -375,7 +467,7 @@ export default function SingleTaskPage() {
                   >
                     <svg className="w-5 h-5 text-purple-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                     <span className="text-sm text-gray-300 truncate flex-1">{aud.name}</span>
-                    <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-medium">@Audio{aud.index}</span>
+                    <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-medium">@音频{aud.index}</span>
                     <button
                       onClick={() => removeAudio(aud.id)}
                       className="w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400"
@@ -423,55 +515,23 @@ export default function SingleTaskPage() {
             />
           </div>
 
-          {/* Prompt */}
-          <div className="bg-[#1c1f2e] rounded-2xl p-4 border border-gray-800 relative">
-            <label className="block text-sm font-bold mb-3 text-gray-300">
-              提示词
-            </label>
-            <textarea
-              ref={textareaRef}
-              className="w-full bg-transparent text-sm resize-none focus:outline-none min-h-[100px] placeholder-gray-600 text-gray-200 leading-relaxed"
-              placeholder="描述你想要生成的视频场景。上传参考图后可使用 @1、@2 等引用图片，例如：@1 作为首帧，@2 作为尾帧，模仿 @3 的动作..."
-              value={prompt}
-              onChange={handlePromptChange}
-              onKeyDown={handleAtMenuKeyDown}
-              onBlur={() => setTimeout(() => setShowAtMenu(false), 200)}
-              maxLength={5000}
-              disabled={isGenerating}
-            />
-            {/* @ Mention Popup */}
-            {showAtMenu && atMenuItems.length > 0 && (
-              <div className="absolute z-50 mt-1 bg-[#252838] border border-gray-600 rounded-xl shadow-2xl p-2 min-w-[200px]">
-                {images.length > 0 && (
-                  <div className="text-xs text-gray-400 px-2 py-1 mb-1">参考图片</div>
-                )}
-                {atMenuItems.map((item, idx) => (
-                  <div key={item.id}>
-                    {item.type === 'audio' && idx === images.length && audioFiles.length > 0 && (
-                      <div className="text-xs text-gray-400 px-2 py-1 mt-1 mb-1">参考音频</div>
-                    )}
-                    <button
-                      onMouseDown={(e) => { e.preventDefault(); insertAtReferenceItem(item); }}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
-                        idx === atSelectedIndex ? 'bg-purple-500/20' : 'hover:bg-purple-500/20'
-                      }`}
-                    >
-                      {item.type === 'image' && item.previewUrl ? (
-                        <img src={item.previewUrl} alt="" className="w-8 h-8 object-cover rounded" />
-                      ) : (
-                        <svg className="w-8 h-8 text-purple-400 p-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-                      )}
-                      <span className="text-sm text-purple-400 font-medium">{item.label}</span>
-                      <span className="text-xs text-gray-500 truncate">{item.sublabel}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="text-right text-xs text-gray-500 mt-2">
-              {prompt.length}/5000
+          {/* Prompt Editor */}
+          <PromptEditor
+            key={editorKey}
+            images={images}
+            audioFiles={audioFiles}
+            isGenerating={isGenerating}
+            onSerializedChange={setSerializedPrompt}
+            editorRef={promptEditorRef}
+          />
+
+          {/* 提示词字数统计 */}
+          {serializedPrompt.length > 0 && (
+            <div className={`text-right text-xs mt-1 ${serializedPrompt.length > 2500 ? 'text-red-400' : serializedPrompt.length > 2000 ? 'text-yellow-400' : 'text-gray-500'}`}>
+              {serializedPrompt.length > 2500 && '⚠ 提示词过长，可能导致生成失败。建议精简到 2500 字以内 · '}
+              {serializedPrompt.length}/2500
             </div>
-          </div>
+          )}
 
           {/* Shot Selector */}
           <div className="bg-[#1c1f2e] rounded-2xl border border-gray-800 overflow-hidden">

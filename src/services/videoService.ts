@@ -2,8 +2,9 @@ import type { GenerateVideoRequest, VideoGenerationResponse } from '../types';
 import { getAuthHeaders } from './authService';
 
 export async function generateVideo(
-  request: GenerateVideoRequest,
-  onProgress?: (message: string) => void
+  request: GenerateVideoRequest & { preUploadedUris?: Record<number, string> },
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
 ): Promise<VideoGenerationResponse> {
   const formData = new FormData();
   formData.append('prompt', request.prompt);
@@ -11,8 +12,22 @@ export async function generateVideo(
   formData.append('ratio', request.ratio);
   formData.append('duration', String(request.duration));
 
-  for (const file of request.files) {
-    formData.append('files', file);
+  const preUploaded = request.preUploadedUris || {};
+  const preUploadedIndices: number[] = [];
+  const preUploadedUriList: string[] = [];
+
+  for (let i = 0; i < request.files.length; i++) {
+    if (preUploaded[i]) {
+      preUploadedIndices.push(i);
+      preUploadedUriList.push(preUploaded[i]);
+    } else {
+      formData.append('files', request.files[i]);
+    }
+  }
+
+  if (preUploadedUriList.length > 0) {
+    formData.append('preUploadedUris', JSON.stringify(preUploadedUriList));
+    formData.append('preUploadedIndices', JSON.stringify(preUploadedIndices));
   }
 
   for (const file of request.audioFiles ?? []) {
@@ -29,6 +44,7 @@ export async function generateVideo(
     method: 'POST',
     headers: getAuthHeaders(),
     body: formData,
+    signal,
   });
 
   const submitData = await submitRes.json();
@@ -49,9 +65,12 @@ export async function generateVideo(
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxPollTime) {
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, pollInterval);
+      if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason || new DOMException('Aborted', 'AbortError')); }, { once: true });
+    });
 
-    const pollRes = await fetch(`/api/task/${taskId}`);
+    const pollRes = await fetch(`/api/task/${taskId}`, { headers: getAuthHeaders(), signal });
     const pollData = await pollRes.json();
 
     if (pollData.status === 'done') {
@@ -72,4 +91,19 @@ export async function generateVideo(
   }
 
   throw new Error('视频生成超时，请稍后重试');
+}
+
+export async function preUploadImage(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/upload-image', {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || '图片预上传失败');
+  }
+  return data.imageUri;
 }

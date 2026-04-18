@@ -45,6 +45,13 @@ export default function ProjectDetailPage({ currentUser }: Props) {
       setProject(proj);
       setTree(shotTree);
       setCodeInput(proj.code || '');
+      // 默认展开所有集
+      if (shotTree.length > 0) {
+        setExpandedEpisodes(prev => {
+          if (prev.size === 0) return new Set(shotTree.map(ep => ep.id));
+          return prev;
+        });
+      }
     } catch (e: any) {
       console.error(e);
     } finally {
@@ -128,6 +135,10 @@ export default function ProjectDetailPage({ currentUser }: Props) {
     }
   };
 
+  const handleCreateFromShot = (shotId: number) => {
+    navigate(`/generate?shotId=${shotId}`);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-full text-gray-400">加载中...</div>;
   if (!project) return <div className="flex items-center justify-center h-full text-gray-400">项目不存在</div>;
 
@@ -136,8 +147,9 @@ export default function ProjectDetailPage({ currentUser }: Props) {
       {/* 头部 */}
       <div className="flex items-center justify-between">
         <div>
-          <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white text-sm mb-2">
-            ← 返回
+          <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white text-sm mb-2 flex items-center gap-1">
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6" /></svg>
+            返回项目列表
           </button>
           <h1 className="text-2xl font-bold text-white">{project.name}</h1>
           {project.description && <p className="text-gray-400 text-sm mt-1">{project.description}</p>}
@@ -274,7 +286,7 @@ export default function ProjectDetailPage({ currentUser }: Props) {
                   ep.shots.map(shot => (
                     <div
                       key={shot.id}
-                      className={`flex items-center justify-between px-6 py-2 hover:bg-gray-750 cursor-pointer ${
+                      className={`flex items-center justify-between px-6 py-2.5 hover:bg-gray-750 cursor-pointer ${
                         selectedShotId === shot.id ? 'bg-gray-700' : ''
                       }`}
                       onClick={() => setSelectedShotId(selectedShotId === shot.id ? null : shot.id)}
@@ -286,14 +298,26 @@ export default function ProjectDetailPage({ currentUser }: Props) {
                           <span className="text-xs bg-gray-600 text-gray-300 px-2 py-0.5 rounded">{shot.preferred_model}</span>
                         )}
                       </div>
-                      {isAdmin && (
+                      <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                         <button
-                          onClick={e => { e.stopPropagation(); handleDeleteShot(shot.id); }}
-                          className="text-red-400 text-xs hover:underline"
+                          onClick={() => handleCreateFromShot(shot.id)}
+                          className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 transition-colors"
+                          title="跳转到生成页并关联此镜头"
                         >
-                          删除
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                          创作
                         </button>
-                      )}
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteShot(shot.id)}
+                            className="text-red-400 text-xs hover:underline"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}

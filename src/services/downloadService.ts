@@ -48,7 +48,7 @@ function getFallbackFilename(taskId: number, fallbackFilename?: string): string 
   return fallbackFilename || `task-${taskId}.mp4`;
 }
 
-function triggerBrowserDownload(url: string, fallbackFilename: string): void {
+export function triggerBrowserDownload(url: string, fallbackFilename: string): void {
   const link = document.createElement('a');
 
   link.href = new URL(url, window.location.href).toString();
@@ -67,7 +67,12 @@ export async function getDownloadTasks(
   status: string = 'all',
   type: string = 'all',
   page: number = 1,
-  pageSize: number = 20
+  pageSize: number = 20,
+  projectId?: number,
+  source?: string,
+  creatorId?: number,
+  dateFrom?: string,
+  dateTo?: string
 ): Promise<DownloadTaskList> {
   const params = new URLSearchParams({
     status,
@@ -75,6 +80,21 @@ export async function getDownloadTasks(
     page: page.toString(),
     pageSize: pageSize.toString(),
   });
+  if (projectId) {
+    params.set('projectId', projectId.toString());
+  }
+  if (source && source !== 'all') {
+    params.set('source', source);
+  }
+  if (creatorId) {
+    params.set('creatorId', creatorId.toString());
+  }
+  if (dateFrom) {
+    params.set('dateFrom', dateFrom);
+  }
+  if (dateTo) {
+    params.set('dateTo', dateTo);
+  }
 
   const response = await fetch(`${API_BASE}/download/tasks?${params}`, {
     headers: getAuthHeaders(),
@@ -193,6 +213,20 @@ export async function refreshDownloadTasks(): Promise<{
   return result.data!;
 }
 
+
+/**
+ * 获取有任务的生成者列表
+ */
+export async function getCreators(): Promise<Array<{ id: number; nickname: string; username: string }>> {
+  const response = await fetch(`${API_BASE}/download/creators`, {
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse<Array<{ id: number; nickname: string; username: string }>> = await response.json();
+  if (!result.success) {
+    throw new Error(result.error || '获取生成者列表失败');
+  }
+  return result.data!;
+}
 /**
  * 从即梦平台同步所有已生成的视频记录
  */
@@ -224,4 +258,19 @@ export async function syncFromJimeng(): Promise<{
     throw new Error(result.error || '同步失败');
   }
   return result.data!;
+}
+
+
+/**
+ * 获取任务配置（用于详情展开）
+ */
+export async function getTaskConfig(taskId: number): Promise<any> {
+  const response = await fetch(`${API_BASE}/tasks/${taskId}/config`, {
+    headers: getAuthHeaders(),
+  });
+  const result: ApiResponse<any> = await response.json();
+  if (!result.success) {
+    throw new Error(result.error || '获取任务配置失败');
+  }
+  return result.data;
 }
