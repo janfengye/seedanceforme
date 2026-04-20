@@ -3,7 +3,7 @@
 > 基于字节跳动即梦平台 Seedance 2.0 模型的 AI 视频生成 Web 应用
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-v0.0.7-green.svg)
+![Version](https://img.shields.io/badge/version-v0.0.16-green.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
 ![Docker](https://img.shields.io/badge/Docker-supported-2496ED.svg)
@@ -27,7 +27,13 @@ Seedance 2.0 Web 是一款面向内容创作者、设计师、营销人员的 AI
 | Seedance 2.0 | — | 国际 | 国际版全能模型（CapCut Dreamina） |
 | Seedance 2.0 Fast | — | 国际 | 国际版快速模型（CapCut Dreamina） |
 
-**最新功能（v0.0.7）：**
+**最新功能（v0.0.16）：**
+- **Chrome 浏览器插件** — Seedance Cookie Importer 插件，一键提取 Dreamina / 即梦 Cookie 并导入平台
+  - 自动检测：点击插件图标自动提取当前浏览器 Cookie，无需手动复制粘贴
+  - 国际版 (Dreamina)：提取完整 Cookie（JSON 格式，33+ 个），自动识别区域前缀（sg-/jp-/us- 等）
+  - 国内版 (即梦)：提取 sessionid Cookie
+  - 一键导入：直接通过 API 导入到 Seedance 平台，无需切换页面
+  - 复制 JSON：生成批量导入格式，粘贴到 Seedance 设置页的「批量导入」弹窗
 - 国际版（CapCut Dreamina）支持：通过国际版 SessionID 生成视频，支持新加坡、日本、美国等区域
 - 代理配置：国际版账号支持 HTTP / SOCKS5 代理，解决国内网络访问国际版的问题
 - 版本类型切换：单任务页和批量管理页支持国内版/国际版切换，国际版自动过滤非 VIP 模型
@@ -46,7 +52,7 @@ Seedance 2.0 Web 是一款面向内容创作者、设计师、营销人员的 AI
 - Playwright 浏览器代理：自动绕过即梦 shark 反爬机制，通过 bdms SDK 注入 `a_bogus` 签名
 - 多即梦账号轮询：支持单任务与批量任务按账号顺序轮询提交
 - 账号隔离提交上下文：按 SessionID 隔离浏览器会话、Cookie、`webId`、`userId`
-- 提交链路可观测性增强：新增”平台拒绝提交 / 提交成功 historyId”日志，便于定位风控与 fallback
+- 提交链路可观测性增强：新增"平台拒绝提交 / 提交成功 historyId"日志，便于定位风控与 fallback
 
 
 
@@ -573,7 +579,7 @@ docker compose down
 
 欢迎加入技术交流群，分享使用心得和创作成果：
 
-![微信图片_20260413195228_3_441](https://mypicture-1258720957.cos.ap-nanjing.myqcloud.com/Obsidian/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260413195228_3_441.jpg)
+![20260419225804_77_6](https://mypicture-1258720957.cos.ap-nanjing.myqcloud.com/Obsidian/20260419225804_77_6.jpg)
 
 ## 作者联系
 
@@ -583,6 +589,7 @@ docker compose down
 
 | 模版版本 | 日期 | 修订说明 |
 |------|------|------|
+| v0.0.16 | 2026-04-20 | 新增 Chrome 浏览器插件 Seedance Cookie Importer：一键提取 Dreamina / 即梦 Cookie 并导入平台，支持自动检测、国际版完整 Cookie 提取、国内版 sessionid 提取、一键导入 API、复制 JSON 批量导入、设置持久化 |
 | v0.0.7 | 2026-04-10 | 新增国际版（CapCut Dreamina）支持：国际版 SessionID 管理、代理配置（HTTP/SOCKS5）、国际版视频生成与代理播放；VideoPlayer 增加保存到服务器/浏览器下载/打开文件夹；下载管理新增版本类型过滤和国际版同步 |
 | v0.0.6 | 2026-04-04 | 新增 Seedance 2.0 VIP / Seedance 2.0 Fast VIP 双 VIP 模型，支持 720p 高分辨率输出；VIP 模型使用 `dreamina_seedance_40_*_vision` 模型 key 与 `seedance_20_*_720p_output` benefit type |
 | v0.0.5 | 2026-03-31 | 新增多即梦账号轮询、失败 fallback、按 SessionID 隔离浏览器提交上下文；补充”平台拒绝提交 / 提交成功 historyId”日志说明与排障文档 |
@@ -602,6 +609,7 @@ docker compose down
 | v0.0.5 | 2026-03-31 | 新增多即梦账号轮询与失败 fallback；按 SessionID 隔离浏览器会话、Cookie、`webId`、`userId`；补充提交链路可观测日志与排障说明 |
 | v0.0.6 | 2026-04-04 | 新增 Seedance 2.0 VIP / Seedance 2.0 Fast VIP 双 VIP 模型，支持 720p 高分辨率输出；VIP 模型使用 `dreamina_seedance_40_*_vision` 系列模型 |
 | v0.0.7 | 2026-04-10 | 新增国际版（CapCut Dreamina）支持：国际版 SessionID 管理（支持 sg/jp/us 等区域）、HTTP/SOCKS5 代理配置、国际版视频生成与 CDN 代理播放、国际版权益查询、国际版视频同步；VideoPlayer 增加保存/下载/打开文件夹操作栏；下载管理新增版本类型过滤 |
+| v0.0.16 | 2026-04-20 | 新增 Chrome 浏览器插件 Seedance Cookie Importer：一键提取 Dreamina / 即梦 Cookie 并导入平台，支持自动检测、国际版完整 Cookie 提取（33+ 个）、国内版 sessionid 提取、一键导入 API、复制 JSON 批量导入、设置持久化 |
 
 ## License
 
