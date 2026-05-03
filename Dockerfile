@@ -45,8 +45,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
+    fonts-noto-cjk \
     libatspi2.0-0 \
     libwayland-client0 \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制后端依赖文件并安装（仅生产依赖）
@@ -60,6 +66,7 @@ RUN cd server && npx playwright-core install chromium
 COPY server/index.js server/browser-service.js ./server/
 COPY server/database/ ./server/database/
 COPY server/services/ ./server/services/
+COPY server/debug-vnc.mjs ./server/
 COPY server/middleware/ ./server/middleware/
 COPY server/routes/ ./server/routes/
 

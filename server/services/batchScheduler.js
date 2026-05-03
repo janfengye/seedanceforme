@@ -330,6 +330,7 @@ class BatchScheduler {
         error_message: null,
         account_info: result.accountInfo || null,
       });
+      // 分配版本号
 
       this._mergeTaskSnapshot(taskId, {
         status: 'done',

@@ -27,6 +27,27 @@ function buildSessionCookies(sessionId, webId, userId) {
   ];
 }
 
+
+// Parse Cookie Editor JSON string into Playwright-compatible cookies
+function parseCookieEditorJson(cookieString) {
+  try {
+    const cookies = JSON.parse(cookieString);
+    if (!Array.isArray(cookies)) return null;
+    return cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain || '.capcut.com',
+      path: c.path || '/',
+      secure: c.secure || false,
+      httpOnly: c.httpOnly || false,
+      sameSite: (c.sameSite || 'Lax'),
+      ...(c.expirationDate ? { expires: c.expirationDate } : {}),
+    }));
+  } catch {
+    return null;
+  }
+}
+
 class BrowserService {
   constructor() {
     this.browser = null;
@@ -52,8 +73,9 @@ class BrowserService {
     return this.browser;
   }
 
-  async _refreshSessionCookies(session, sessionId, webId, userId, reason = 'refresh') {
-    const cookies = buildSessionCookies(sessionId, webId, userId);
+  async _refreshSessionCookies(session, sessionId, webId, userId, reason = 'refresh', storedCookies = null) {
+    const parsedStored = storedCookies ? parseCookieEditorJson(storedCookies) : null;
+    const cookies = parsedStored || buildSessionCookies(sessionId, webId, userId);
     const cookieNames = new Set(cookies.map((cookie) => cookie.name));
     const existingCookies = await session.context.cookies('https://jimeng.jianying.com');
     const cookiesToClear = existingCookies.filter((cookie) => cookieNames.has(cookie.name));
@@ -83,10 +105,10 @@ class BrowserService {
     );
   }
 
-  async getSession(sessionId, webId, userId) {
+  async getSession(sessionId, webId, userId, storedCookies = null) {
     const existing = this.sessions.get(sessionId);
     if (existing) {
-      await this._refreshSessionCookies(existing, sessionId, webId, userId, 'reuse');
+      await this._refreshSessionCookies(existing, sessionId, webId, userId, 'reuse', storedCookies);
       this._touchSession(sessionId, existing);
       return existing;
     }
@@ -129,9 +151,11 @@ class BrowserService {
       boundSessionId: sessionId,
     };
 
-    await this._refreshSessionCookies(session, sessionId, webId, userId, 'create');
+    await this._refreshSessionCookies(session, sessionId, webId, userId, 'create', storedCookies);
 
-    console.log(`[browser] 正在导航到 jimeng.jianying.com (session: ${sessionId.substring(0, 8)}...)`);
+    const isIntl = storedCookies && parseCookieEditorJson(storedCookies);
+    const navUrl = isIntl ? 'https://dreamina.capcut.com/ai-tool/video/generate' : 'https://jimeng.jianying.com/ai-tool/generate';
+    console.log(`[browser] 正在导航到 ${new URL(navUrl).hostname} (session: ${sessionId.substring(0, 8)}...)`);
 
     let gotoError = null;
     for (let attempt = 0; attempt <= PAGE_GOTO_MAX_RETRIES; attempt += 1) {
@@ -139,7 +163,7 @@ class BrowserService {
         if (attempt > 0) {
           console.log(`[browser] 重试导航 (第${attempt}次)...`);
         }
-        await page.goto('https://jimeng.jianying.com/ai-tool/video/generate', {
+        await page.goto(navUrl, {
           waitUntil: 'networkidle',
           timeout: PAGE_GOTO_TIMEOUT,
         });
@@ -201,8 +225,8 @@ class BrowserService {
     console.log(`[browser] 会话已关闭 (session: ${sessionId.substring(0, 8)}...)`);
   }
 
-  async fetch(sessionId, webId, userId, url, options = {}) {
-    const session = await this.getSession(sessionId, webId, userId);
+  async fetch(sessionId, webId, userId, url, options = {}, storedCookies = null) {
+    const session = await this.getSession(sessionId, webId, userId, storedCookies);
     const { method = 'GET', headers = {}, body } = options;
 
     console.log(`[browser] 当前浏览器上下文已绑定账号 session: ${sessionId.substring(0, 8)}...`);

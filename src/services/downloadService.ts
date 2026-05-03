@@ -232,6 +232,7 @@ export async function getCreators(): Promise<Array<{ id: number; nickname: strin
  */
 export async function syncFromJimeng(): Promise<{
   synced: number;
+  totalScanned?: number;
   total: number;
   items?: Array<{
     taskId: number;
@@ -246,6 +247,7 @@ export async function syncFromJimeng(): Promise<{
   });
   const result: ApiResponse<{
     synced: number;
+  totalScanned?: number;
     total: number;
     items?: Array<{
       taskId: number;

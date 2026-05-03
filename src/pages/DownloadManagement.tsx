@@ -205,7 +205,7 @@ export default function DownloadManagementPage() {
 
     try {
       const result = await downloadService.syncFromJimeng();
-      showToast(`同步完成！从即梦平台获取了 ${result.total} 条记录，成功同步 ${result.synced} 条`, 'success');
+      showToast(`同步完成！扫描 ${result.totalScanned || result.total} 条历史，发现 ${result.total} 条视频，成功同步 ${result.synced} 条`, 'success');
       loadTasks();
     } catch (error) {
       showToast(`同步失败：${error instanceof Error ? error.message : error}`, 'error');
@@ -719,8 +719,14 @@ export default function DownloadManagementPage() {
                     )}
                   </td>
                   {/* 生成者 */}
-                  <td className="px-4 py-3 text-sm text-gray-300">
-                    {task.nickname || task.username || '-'}
+                  <td className="px-4 py-3 text-sm">
+                    <div className="text-gray-300">{task.nickname || task.username || '-'}</div>
+                    {(() => {
+                      try {
+                        const info = task.account_info ? JSON.parse(task.account_info) : null;
+                        return info?.name ? <div className="text-xs text-gray-500 mt-0.5">{info.name}</div> : null;
+                      } catch { return null; }
+                    })()}
                   </td>
                   {/* 时间: 双行 */}
                   <td className="px-4 py-3">

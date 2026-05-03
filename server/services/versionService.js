@@ -20,8 +20,9 @@ export function numberToVersionLabel(n) {
  */
 export function assignVersionLabel(taskId) {
   const db = getDatabase();
-  const task = db.prepare('SELECT id, shot_id, user_id FROM tasks WHERE id = ?').get(taskId);
+  const task = db.prepare('SELECT id, shot_id, user_id, version_label FROM tasks WHERE id = ?').get(taskId);
   if (!task || !task.shot_id) return null;
+  if (task.version_label) return task.version_label; // idempotent
 
   const count = db.prepare(
     'SELECT COUNT(*) as cnt FROM tasks WHERE shot_id = ? AND user_id = ? AND version_label IS NOT NULL'

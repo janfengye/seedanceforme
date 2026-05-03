@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import browserService from '../browser-service.js';
-import { assignVersionLabel } from "./versionService.js";
 import { getDatabase } from '../database/index.js';
+import { disableAccountBySessionId } from "./jimengSessionService.js";
 
 // 常量定义
 const JIMENG_BASE_URL = 'https://jimeng.jianying.com';
@@ -46,9 +46,9 @@ function buildSessionCookie(sessionId, webId, userId) {
   ].join('; ');
 }
 
-function createJimengRequestContext(sessionId) {
+function createJimengRequestContext(sessionId, storedCookies = null) {
   const { webId, userId } = getAccountIdentity(sessionId);
-  return { sessionId, webId, userId };
+  return { sessionId, webId, userId, storedCookies };
 }
 
 function getSessionLogLabel(sessionId) {
@@ -60,13 +60,26 @@ function getSessionLogLabel(sessionId) {
 }
 
 function getRequestContext(options = {}) {
-  return options.requestContext || createJimengRequestContext(options.sessionId);
+  return options.requestContext || createJimengRequestContext(options.sessionId, options.storedCookies);
+}
+
+function parseCookieJsonToString(cookieJsonStr) {
+  try {
+    const cookies = JSON.parse(cookieJsonStr);
+    if (!Array.isArray(cookies)) return '';
+    return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+  } catch {
+    return '';
+  }
 }
 
 function buildGenerateHeaders(requestContext) {
+  const cookieStr = requestContext.storedCookies
+    ? parseCookieJsonToString(requestContext.storedCookies)
+    : buildSessionCookie(requestContext.sessionId, requestContext.webId, requestContext.userId);
   return {
     ...FAKE_HEADERS,
-    Cookie: buildSessionCookie(requestContext.sessionId, requestContext.webId, requestContext.userId),
+    Cookie: cookieStr,
   };
 }
 
@@ -76,7 +89,7 @@ function buildGenerateParams(requestContext, extraParams = {}) {
     device_platform: 'web',
     region: 'cn',
     webId: requestContext.webId,
-    da_version: '3.3.2',
+    da_version: '3.3.12',
     web_component_open_flag: 1,
     web_version: '7.5.0',
     aigc_features: 'app_lip_sync',
@@ -95,7 +108,6 @@ function logRequestContext(action, requestContext) {
   console.log(`[video] ${action} session: ${getSessionLogLabel(requestContext.sessionId)}, webId: ${String(requestContext.webId).slice(0, 10)}..., uid: ${requestContext.userId.slice(0, 8)}...`);
 }
 
-export { createJimengRequestContext };
 
 
 const FAKE_HEADERS = {
@@ -287,8 +299,9 @@ function createAWSSignature(
  */
 async function jimengRequest(method, uri, sessionId, options = {}) {
   const requestContext = getRequestContext({ ...options, sessionId });
+  const baseUrl = requestContext.storedCookies ? 'https://dreamina.capcut.com' : JIMENG_BASE_URL;
   const { deviceTime, sign } = generateSign(uri);
-  const fullUrl = new URL(`${JIMENG_BASE_URL}${uri}`);
+  const fullUrl = new URL(`${baseUrl}${uri}`);
 
   const defaultParams = buildGenerateParams(requestContext, options.params || {});
 
@@ -322,6 +335,13 @@ async function jimengRequest(method, uri, sessionId, options = {}) {
         ...fetchOptions,
         signal: AbortSignal.timeout(45000),
       });
+
+      // 401 表示 session 已失效，自动禁用该账号
+      if (response.status === 401) {
+        console.error("[jimeng] 401 Unauthorized for sessionId:", sessionId?.substring(0, 8) + "...");
+        try { disableAccountBySessionId(sessionId); } catch (e) { console.error("[jimeng] disableAccount failed:", e.message); }
+        throw Object.assign(new Error("即梦账号已失效(401)，已自动禁用"), { isApiError: true });
+      }
       const data = await response.json();
 
       if (isFinite(Number(data.ret))) {
@@ -506,6 +526,21 @@ async function uploadImageBuffer(buffer, sessionId, requestContext = createJimen
   const imageUri =
     commitResult.Result?.PluginResult?.[0]?.ImageUri || result.Uri;
   console.log(`  [upload] 图片上传完成：${imageUri}`);
+
+  // 提交图片审核（即梦官网必需步骤）
+  try {
+    await jimengRequest(
+      'post',
+      '/mweb/v1/imagex/submit_audit_job',
+      sessionId,
+      withRequestContext({
+        data: { uri_list: [imageUri] }
+      }, requestContext)
+    );
+    console.log(`  [upload] 图片审核已提交：${imageUri}`);
+  } catch (auditErr) {
+    console.warn(`  [upload] 图片审核提交失败（非致命）：${auditErr.message}`);
+  }
   return imageUri;
 }
 
@@ -680,7 +715,7 @@ async function uploadAudioBuffer(buffer, sessionId, requestContext = createJimen
   if (commitResult?.ResponseMetadata?.Error)
     throw new Error(`提交音频上传失败：${JSON.stringify(commitResult.ResponseMetadata.Error)}`);
 
-  const vid = commitResult?.Result?.Vid || commitResult?.Result?.Results?.[0]?.Uri;
+  const vid = commitResult?.Result?.Results?.[0]?.Vid || commitResult?.Result?.Vid;
   if (!vid) throw new Error('音频上传响应缺少 Vid/Uri');
 
   const duration = parseAudioDuration(buffer);
@@ -816,6 +851,7 @@ async function generateSeedanceVideo(options) {
     files = [],
     audioFiles = [],
     sessionId,
+    storedCookies = null,
     model = 'seedance-2.0',
     onProgress,
     onSubmitId,
@@ -1096,7 +1132,8 @@ async function generateSeedanceVideo(options) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(generateBody),
-    }
+    },
+    storedCookies
   );
 
   if (generateResult.ret !== undefined && String(generateResult.ret) !== '0') {
@@ -1130,10 +1167,28 @@ async function generateSeedanceVideo(options) {
   let status = 20;
   let failCode;
   let itemList = [];
-  const maxRetries = 60;
+  const maxRetries = 360;  // 360次 × 30秒 = 最多3小时
+  const POLL_INTERVAL = 30000;  // 30秒，和即梦官网一致
 
   for (let retryCount = 0; retryCount < maxRetries && status === 20; retryCount++) {
     try {
+      // 先查询排队进度
+      let queueInfo = null;
+      let forecastQueueCost = 0;
+      try {
+        const queueResult = await jimengRequest(
+          'post',
+          '/mweb/v1/get_history_queue_info',
+          sessionId,
+          withRequestContext({ data: { history_ids: [historyId] } }, requestContext)
+        );
+        queueInfo = queueResult?.[historyId]?.queue_info;
+        forecastQueueCost = queueResult?.[historyId]?.forecast_cost_time?.forecast_queue_cost || 0;
+      } catch (e) {
+        // queue_info 查询失败不影响主流程
+      }
+
+      // 再查询生成状态
       const result = await jimengRequest(
         'post',
         '/mweb/v1/get_history_by_ids',
@@ -1144,11 +1199,16 @@ async function generateSeedanceVideo(options) {
       const historyData = result?.history_list?.[0] || result?.[historyId];
 
       if (!historyData) {
-        const waitTime = Math.min(2000 * (retryCount + 1), 30000);
-        console.log(
-          `[video] 轮询 #${retryCount + 1}: 数据不存在，等待 ${waitTime}ms`
-        );
-        await new Promise((r) => setTimeout(r, waitTime));
+        // 数据不存在，可能还在队列中
+        if (queueInfo && queueInfo.queue_idx > 0) {
+          const qIdx = queueInfo.queue_idx;
+          const forecastMin = Math.ceil(forecastQueueCost / 60) || Math.ceil(qIdx / 50 * 30 / 60);
+          console.log(`[video] 轮询 #${retryCount + 1}: 排队中 第${qIdx}位，预计${forecastMin}分钟`);
+          if (onProgress) onProgress(`排队中，当前第 ${qIdx} 位，预计约 ${forecastMin} 分钟...`);
+        } else {
+          console.log(`[video] 轮询 #${retryCount + 1}: 数据不存在，等待中`);
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
         continue;
       }
 
@@ -1173,13 +1233,18 @@ async function generateSeedanceVideo(options) {
       }
 
       if (status === 20) {
-        if (elapsed < 120) {
-          if (onProgress) onProgress('AI 正在生成视频，请耐心等待...');
+        let progressMsg;
+        if (queueInfo && queueInfo.queue_idx > 0) {
+          const qIdx = queueInfo.queue_idx;
+          const forecastMin = Math.ceil(forecastQueueCost / 60) || Math.ceil(qIdx / 50 * 30 / 60);
+          progressMsg = `排队中，第 ${qIdx} 位，预计 ${forecastMin} 分钟（已等 ${mins} 分钟）`;
         } else {
-          if (onProgress) onProgress(`视频生成中，已等待 ${mins} 分钟...`);
+          progressMsg = mins < 2
+            ? 'AI 正在生成视频，请耐心等待...'
+            : `视频生成中，已等待 ${mins} 分钟...`;
         }
-        const waitTime = 2000 * Math.min(retryCount + 1, 5);
-        await new Promise((r) => setTimeout(r, waitTime));
+        if (onProgress) onProgress(progressMsg);
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
       }
     } catch (error) {
       if (
@@ -1188,12 +1253,13 @@ async function generateSeedanceVideo(options) {
       )
         throw error;
       console.log(`[video] 轮询出错：${error.message}`);
-      await new Promise((r) => setTimeout(r, 2000 * (retryCount + 1)));
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
     }
   }
 
   if (status === 20)
-    throw new Error('视频生成超时 (约 20 分钟)，请稍后重试');
+    throw new Error('视频生成超时 (已等待超过3小时)，请稍后重试');
+
 
   if (onProgress) onProgress('正在获取高清视频...');
 
@@ -1276,18 +1342,10 @@ function updateTaskStatus(taskId, status, videoUrl = null, historyId = null) {
     WHERE id = ?
   `);
   stmt.run(status, videoUrl, historyId, taskId);
-
-  // 任务成功完成时自动分配版本号
-  if (status === 'done') {
-    try {
-      assignVersionLabel(taskId);
-    } catch (e) {
-      console.error('[versionService] 版本号分配失败:', e.message);
-    }
-  }
 }
 
-export {
+
+export { jimengRequest as videoGeneratorJimengRequest,
   generateSeedanceVideo,
   updateTaskStatus,
   MODEL_MAP,

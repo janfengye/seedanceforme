@@ -28,6 +28,9 @@ function mapAccount(row) {
     creditBalance: row.credit_balance || 0,
     creditUpdatedAt: row.credit_updated_at || null,
     vipLevel: row.vip_level || 0,
+    cookies: row.cookies || null,
+    versionType: row.version_type || "domestic",
+    proxyUrl: row.proxy_url || null,
   };
 }
 
@@ -172,6 +175,10 @@ export function createUserAccount(userId, payload) {
     : normalizePriority(payload.priority, Number(nextPriorityRow?.nextPriority) || 0);
   const isDefault = isFirstAccount ? 1 : 0;
 
+  const cookies = payload.cookies || null;
+  const versionType = payload.versionType || 'domestic';
+  const proxyUrl = payload.proxyUrl || null;
+
   const result = db.prepare(`
     INSERT INTO jimeng_session_accounts (
       user_id,
@@ -180,10 +187,13 @@ export function createUserAccount(userId, payload) {
       is_default,
       is_enabled,
       priority,
+      cookies,
+      version_type,
+      proxy_url,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).run(userId, name, sessionId, isDefault, isEnabled, priority);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `).run(userId, name, sessionId, isDefault, isEnabled, priority, cookies, versionType, proxyUrl);
 
   syncAccountOrdering(userId);
   return getUserAccountById(userId, Number(result.lastInsertRowid));
@@ -230,15 +240,22 @@ export function updateUserAccount(userId, accountId, payload) {
     throw new Error('该 SessionID 已存在');
   }
 
+  const nextCookies = payload.cookies !== undefined ? (payload.cookies || null) : existing.cookies;
+  const nextVersionType = payload.versionType !== undefined ? (payload.versionType || 'domestic') : existing.versionType;
+  const nextProxyUrl = payload.proxyUrl !== undefined ? (payload.proxyUrl || null) : existing.proxyUrl;
+
   db.prepare(`
     UPDATE jimeng_session_accounts
     SET name = ?,
         session_id = ?,
         is_enabled = ?,
         priority = ?,
+        cookies = ?,
+        version_type = ?,
+        proxy_url = ?,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND user_id = ?
-  `).run(nextName, nextSessionId, nextIsEnabled ? 1 : 0, nextPriority, accountId, userId);
+  `).run(nextName, nextSessionId, nextIsEnabled ? 1 : 0, nextPriority, nextCookies, nextVersionType, nextProxyUrl, accountId, userId);
 
   syncAccountOrdering(userId);
   return getUserAccountById(userId, accountId);
@@ -421,6 +438,20 @@ export async function keepAliveSessions() {
   console.log('[keepalive] 验证完成');
 }
 
+/**
+ * 禁用指定 sessionId 的账号（如 401 被封时调用）
+ */
+export function disableAccountBySessionId(sessionId) {
+  const db = getDatabase();
+  const result = db.prepare(
+    "UPDATE jimeng_session_accounts SET is_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE session_id = ? AND is_enabled = 1"
+  ).run(sessionId);
+  if (result.changes > 0) {
+    console.warn("[jimengSession] Disabled account with sessionId:", sessionId.substring(0, 8) + "...");
+  }
+  return result.changes;
+}
+
 export default {
   listUserAccounts,
   listActiveAccounts,
@@ -434,4 +465,5 @@ export default {
   resolveEffectiveSessions,
   resolveEffectiveSession,
   formatAccountInfo,
+  disableAccountBySessionId,
 };

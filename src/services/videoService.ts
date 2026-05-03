@@ -57,11 +57,18 @@ export async function generateVideo(
     throw new Error('服务器未返回任务ID');
   }
 
+
+  // Save generation state to localStorage for resume on page refresh
+  if (request.shotId) {
+    localStorage.setItem("generating_shot_" + request.shotId, JSON.stringify({
+      taskId, dbTaskId: submitData.dbTaskId, startTime: Date.now()
+    }));
+  }
   // 第2步: 轮询获取结果
   onProgress?.('已提交，等待AI生成视频...');
 
-  const maxPollTime = 25 * 60 * 1000; // 25 分钟
-  const pollInterval = 3000; // 3 秒
+  const maxPollTime = 180 * 60 * 1000; // 3 小时
+  const pollInterval = 10000; // 10 秒
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxPollTime) {
@@ -76,12 +83,15 @@ export async function generateVideo(
     if (pollData.status === 'done') {
       const result = pollData.result;
       if (result?.data?.[0]?.url) {
+        if (request.shotId) localStorage.removeItem("generating_shot_" + request.shotId);
         return result;
       }
+      if (request.shotId) localStorage.removeItem("generating_shot_" + request.shotId);
       throw new Error('未获取到视频结果');
     }
 
     if (pollData.status === 'error') {
+      if (request.shotId) localStorage.removeItem("generating_shot_" + request.shotId);
       throw new Error(pollData.error || '视频生成失败');
     }
 
@@ -90,6 +100,7 @@ export async function generateVideo(
     }
   }
 
+  if (request.shotId) localStorage.removeItem("generating_shot_" + request.shotId);
   throw new Error('视频生成超时，请稍后重试');
 }
 

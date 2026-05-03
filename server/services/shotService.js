@@ -93,7 +93,7 @@ export function getShotVersions(shotId) {
            u.nickname, u.username
     FROM tasks t
     LEFT JOIN users u ON t.user_id = u.id
-    WHERE t.shot_id = ? AND t.version_label IS NOT NULL
+    WHERE t.shot_id = ? AND t.version_label IS NOT NULL AND t.status = 'done' AND t.video_url IS NOT NULL
     ORDER BY t.created_at ASC
   `).all(shotId);
 }

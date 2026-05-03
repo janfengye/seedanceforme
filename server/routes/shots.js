@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getDatabase } from "../database/index.js";
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import * as shotService from '../services/shotService.js';
 import * as episodeService from '../services/episodeService.js';
@@ -75,6 +76,19 @@ router.get('/shots/:id/versions', authenticate, (req, res) => {
     }
     const versions = shotService.getShotVersions(req.params.id);
     res.json({ success: true, data: versions });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/shots/:id/generating — 查询镜头是否有活跃生成任务
+router.get('/shots/:id/generating', authenticate, (req, res) => {
+  try {
+    const db = getDatabase();
+    const row = db.prepare(
+      "SELECT COUNT(*) as cnt FROM tasks WHERE shot_id = ? AND status = 'generating'"
+    ).get(req.params.id);
+    res.json({ success: true, generating: (row?.cnt || 0) > 0, count: row?.cnt || 0 });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

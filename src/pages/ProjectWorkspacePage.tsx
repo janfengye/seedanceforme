@@ -40,6 +40,7 @@ export default function ProjectWorkspacePage({ currentUser }: Props) {
   const [activeShotId, setActiveShotId] = useState<number | null>(null);
   const [versions, setVersions] = useState<ShotVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [shotGenerating, setShotGenerating] = useState(false);
 
   // ── 管理操作状态 ──
   const [editingCode, setEditingCode] = useState(false);
@@ -105,7 +106,7 @@ export default function ProjectWorkspacePage({ currentUser }: Props) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // 加载版本
+  // 加载版本 + 检查是否正在生成
   useEffect(() => {
     if (activeShotId) {
       setVersionsLoading(true);
@@ -113,8 +114,71 @@ export default function ProjectWorkspacePage({ currentUser }: Props) {
         .then(v => { setVersions(v); setVersionsExpanded(true); })
         .catch(() => setVersions([]))
         .finally(() => setVersionsLoading(false));
+      // 查询是否有活跃生成任务
+      fetch(`/api/shots/${activeShotId}/generating`, { headers: { 'X-Session-ID': localStorage.getItem('seedance_session_id') || '' } })
+        .then(r => r.json())
+        .then(d => setShotGenerating(d.generating || false))
+        .catch(() => setShotGenerating(false));
+
+      // Resume polling from localStorage if page was refreshed during generation
+      const savedGen = localStorage.getItem('generating_shot_' + activeShotId);
+      if (savedGen) {
+        try {
+          const { taskId, startTime } = JSON.parse(savedGen);
+          const elapsed = Date.now() - startTime;
+          const maxPollTime = 180 * 60 * 1000;
+          if (elapsed < maxPollTime && taskId) {
+            setShotGenerating(true);
+            setGeneration({ status: 'generating', progress: '恢复生成状态，继续轮询...' });
+            const headers = { 'X-Session-ID': localStorage.getItem('seedance_session_id') || '' };
+            const pollInterval = 10000;
+            const resumePoll = async () => {
+              const remaining = maxPollTime - elapsed;
+              const resumeStart = Date.now();
+              while (Date.now() - resumeStart < remaining) {
+                await new Promise(r => setTimeout(r, pollInterval));
+                try {
+                  const res = await fetch('/api/task/' + taskId, { headers });
+                  const data = await res.json();
+                  if (data.status === 'done') {
+                    localStorage.removeItem('generating_shot_' + activeShotId);
+                    if (data.result?.data?.[0]?.url) {
+                      setGeneration({ status: 'success', result: data.result });
+                    } else {
+                      setGeneration({ status: 'error', error: '未获取到视频结果' });
+                    }
+                    setShotGenerating(false);
+                    getShotVersions(activeShotId).then(setVersions).catch(() => {});
+                    return;
+                  }
+                  if (data.status === 'error') {
+                    localStorage.removeItem('generating_shot_' + activeShotId);
+                    setGeneration({ status: 'error', error: data.error || '视频生成失败' });
+                    setShotGenerating(false);
+                    return;
+                  }
+                  if (data.progress) {
+                    setGeneration(prev => ({ ...prev, progress: data.progress }));
+                  }
+                } catch {
+                  // network error, keep retrying
+                }
+              }
+              localStorage.removeItem('generating_shot_' + activeShotId);
+              setGeneration({ status: 'error', error: '视频生成超时' });
+              setShotGenerating(false);
+            };
+            resumePoll();
+          } else {
+            localStorage.removeItem('generating_shot_' + activeShotId);
+          }
+        } catch {
+          localStorage.removeItem('generating_shot_' + activeShotId);
+        }
+      }
     } else {
       setVersions([]);
+      setShotGenerating(false);
     }
   }, [activeShotId]);
 
@@ -396,7 +460,8 @@ export default function ProjectWorkspacePage({ currentUser }: Props) {
   const videoUrl = generation.status === 'success' && generation.result?.data?.[0]?.url ? generation.result.data[0].url : null;
   const revisedPrompt = generation.status === 'success' ? generation.result?.data?.[0]?.revised_prompt : undefined;
   const isGenerating = generation.status === 'generating';
-  const canGenerate = (serializedPrompt.trim() || images.length > 0) && !isGenerating;
+  const shotHasActiveTask = shotGenerating || versions.some(v => v.status === 'generating');
+  const canGenerate = (serializedPrompt.trim() || images.length > 0) && !isGenerating && !shotHasActiveTask;
 
   if (loading) {
     return (
@@ -774,6 +839,11 @@ export default function ProjectWorkspacePage({ currentUser }: Props) {
                   </div>
 
                   {/* 生成按钮 */}
+                    {shotHasActiveTask && !isGenerating && (
+                      <div className="mb-3 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                        <p className="text-xs text-yellow-400">该镜头有正在生成的任务，请等待完成后再提交新任务</p>
+                      </div>
+                    )}
                   <div>
                     {isGenerating && (
                       <div className="mb-3">

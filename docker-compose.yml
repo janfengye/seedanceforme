@@ -7,6 +7,7 @@ services:
     container_name: seedance-web
     ports:
       - "3001:3001"
+      - "6080:6080"
     environment:
       - NODE_ENV=production
       - PORT=3001

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getDatabase, transaction } from '../database/index.js';
+import { assignVersionLabel } from "./versionService.js";
 
 /**
  * 任务服务层
@@ -328,7 +329,18 @@ export function updateTaskStatus(id, status, extraUpdates = {}) {
     updates.completed_at = new Date().toISOString();
   }
 
-  return updateTask(id, updates);
+  const result = updateTask(id, updates);
+
+  // Auto-assign version label when task completes
+  if (status === "done") {
+    try {
+      assignVersionLabel(id);
+    } catch (err) {
+      console.error("[taskService] Failed to assign version label for task", id, err.message);
+    }
+  }
+
+  return result;
 }
 
 /**

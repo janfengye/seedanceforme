@@ -17,7 +17,10 @@ CREATE TABLE IF NOT EXISTS users (
   last_check_in_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 -- 会话表
@@ -59,7 +62,10 @@ CREATE TABLE IF NOT EXISTS system_config (
   value TEXT,
   description TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 -- 创建索引
@@ -95,7 +101,10 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   settings_json TEXT, -- 项目级设置（模型、比例、时长等）
   code TEXT DEFAULT NULL,
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 -- 任务表
@@ -132,7 +141,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   shot_id INTEGER DEFAULT NULL,
   version_label TEXT DEFAULT NULL,
   FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL,
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 -- 任务素材表
@@ -174,7 +186,10 @@ CREATE TABLE IF NOT EXISTS jimeng_session_accounts (
   credit_updated_at TEXT,
   vip_level INTEGER DEFAULT 0,
   UNIQUE(user_id, session_id),
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 -- 全局设置表
@@ -182,7 +197,10 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  username TEXT
+  username TEXT,
+  cookies TEXT,
+  version_type TEXT DEFAULT 'domestic',
+  proxy_url TEXT
 );
 
 
